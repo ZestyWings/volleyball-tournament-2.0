@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Volleyball Tournament Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <h1>Volleyball Tournament Manager</h1>
+    <p class="muted">Vanilla HTML + JS. Team check-in, pool scheduling, scoring, standings, and a 10-seed elimination bracket (1 and 2 get byes). Pool rounds now auto-match the number of teams: 8→4 rounds/4 games, 10→5 rounds/4 games + Bye row, 12→4 rounds/6 games.</p>
+
+    <!-- Session persistence -->
+    <section class="card" id="sessionCard">
+      <h2>Session</h2>
+      <div class="row">
+        <button id="exportBtn" type="button">Export JSON</button>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+        <button id="importBtn" type="button" class="secondary">Import JSON</button>
+        <button id="freshBtn" type="button" class="secondary">Start fresh</button>
+        <span class="pill ok" id="autosaveBadge">Autosave: ON</span>
+        <span class="muted tiny">(Restores automatically on this device/browser)</span>
+      </div>
+    </section>
+
+    <!-- Team Registration & Check in -->
+    <section class="card" id="teamsCard">
+      <h2>1) Team Registration & Check in</h2>
+      <form id="teamForm" class="row" autocomplete="off">
+        <input id="teamName" type="text" placeholder="Team name" />
+        <button id="addTeam" type="submit">Add team</button>
+        <button id="clearTeams" type="button" class="secondary">Clear all</button>
+        <span class="muted">Max 12 teams. If odd, a BYE will be added for scheduling.</span>
+      </form>
+      <div class="hr"></div>
+      <div class="table-wrap">
+        <table class="table" id="teamsTable">
+          <thead>
+            <tr><th>#</th><th>Name</th><th>Checked in</th><th>Actions</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Pool Play Scheduling -->
+    <section class="card" id="poolCard">
+      <h2>2) Pool Play</h2>
+      <div class="row" style="flex-wrap:wrap; gap:12px;">
+        <label style="display:none">Rounds:
+          <select id="roundCount" disabled>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+        <label class="row" style="gap:6px;">
+          <input type="checkbox" id="manualMode" />
+          <span class="muted">Manual schedule (choose teams per match)</span>
+        </label>
+        <label class="row" style="gap:6px;">
+          <input type="checkbox" id="assistManual" />
+          <span class="muted">Assist manual pairing (filter ineligible)</span>
+        </label>
+        <button id="makeSchedule">Create schedule</button>
+        <button id="resetSchedule" class="secondary">Reset</button>
+      </div>
+      <div id="poolSchedule" class="grid" style="margin-top:12px;"></div>
+      <div class="hr"></div>
+      <div id="standings"></div>
+      <div class="row">
+        <button id="finalizePool" disabled>Finalize pool & compute rankings</button>
+      </div>
+    </section>
+
+    <!-- Bracket -->
+    <section class="card" id="bracketCard">
+      <h2>3) Elimination Bracket (10 teams)</h2>
+      <p class="muted">Seeds 1 and 2 receive a first round bye. 7v10 and 8v9 play-in feed the quarterfinals.</p>
+      <div class="row">
+        <button id="buildBracket" disabled>Build bracket from rankings</button>
+        <button id="resetBracket" class="secondary">Reset bracket</button>
+      </div>
+      <div id="bracket"></div>
+      <div id="champion" class="center" style="margin-top:12px;"></div>
+      <div class="note tiny" style="margin-top:12px;">
+        Tip: reload the page to restore your last session automatically.
+      </div>
+    </section>
+
+    <!-- Test runner (optional) -->
+    <section class="card" id="testsCard">
+      <h2>4) Built-in tests</h2>
+      <button id="runTests" class="secondary">Run tests (see console)</button>
+      <details>
+        <summary>What is covered</summary>
+        <ul class="tiny">
+          <li>Adding teams via Enter and via Add team button</li>
+          <li>Round creation (auto) and presence of Bye game row when 5 rounds chosen</li>
+          <li>Save Round skips Bye game and updates standings</li>
+          <li>Finalize requires all non-bye matches saved</li>
+          <li>Bye uniqueness and rematch prevention</li>
+          <li>Final is best-of-3 sets</li>
+        </ul>
+      </details>
+      <div id="testResults" class="tiny"></div>
+    </section>
+
+    <footer class="muted tiny">© Tournament Helper — multi-file demo. MIT license. Built for quick on-site use.</footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

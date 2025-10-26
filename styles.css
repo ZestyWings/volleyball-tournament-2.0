@@ -1,0 +1,193 @@
+:root { font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+body { margin: 0; padding: 16px; background:#0b0c10; color:#eaf0f6; }
+h1, h2, h3 { margin: 0 0 8px; }
+.wrap { display:grid; gap:16px; max-width:1200px; margin:0 auto; }
+.card { background:#11141a; border:1px solid #232a35; border-radius:12px; padding:16px; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+input[type="text"], select { background:#0e1218; color:#eaf0f6; border:1px solid #2a3442; border-radius:8px; padding:8px 10px; }
+input[type="number"]{ width:72px; }
+button { background:#2e7dff; color:white; border:0; padding:10px 14px; border-radius:10px; cursor:pointer; }
+button.secondary { background:#1c2633; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+.muted { opacity:.8; font-size:.9rem; }
+.table { width:100%; border-collapse: collapse; }
+.table th, .table td { border-bottom:1px solid #1e2430; padding:8px; text-align:left; }
+.pill { padding:2px 8px; border-radius:999px; font-size:.85rem; border:1px solid #2a3442; }
+.ok { background:#10381a; color:#8ef39a; border-color:#1f7a36; }
+.warn { background:#3a1e10; color:#ffb88f; border-color:#7a3c1f; }
+.grid { display:grid; gap:12px; }
+/* Pool match layout
+   Desktop/tablet:
+   [ Team A (name/select + A score under) ]  [ vs ]  [ Team B (name/select + B score under) ]
+   Status goes full-width underneath.
+*/
+.match {
+  display: grid;
+  grid-template-columns: minmax(160px,1fr) auto minmax(160px,1fr);
+  grid-template-areas:
+    "teamA vs teamB"
+    "status status status";
+  column-gap: 8px;
+  row-gap: 8px;
+  padding:8px;
+  border:1px solid #202735;
+  border-radius:10px;
+  align-items:flex-start;
+  background:transparent;
+}
+
+.match .teamA {
+  grid-area: teamA;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+}
+.match .teamB {
+  grid-area: teamB;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+  align-items:flex-start; /* was flex-end */
+  text-align:left;       /* was right */
+}
+
+.match .teamA select,
+.match .teamB select,
+.match .teamA .mono,
+.match .teamB .mono {
+  max-width:100%;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+
+/* score inputs live under each team */
+.match .scoreInput {
+  width:84px;
+}
+
+.match .vs {
+  grid-area: vs;
+  align-self:center;
+  justify-self:center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.match .status {
+  grid-area: status;
+  font-size:.85rem;
+  opacity:.9;
+}
+
+/* Bye row should span the full card width */
+.match .byeRow {
+  grid-column: 1 / -1;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+
+/* Tablet-ish tweaks */
+@media (max-width: 900px) {
+  .match {
+    grid-template-columns: minmax(140px,1fr) auto minmax(140px,1fr);
+  }
+}
+
+/* Phone:
+   Stack Team A, then Team B, then "vs", then status.
+   Scores still stay under the correct team.
+*/
+@media (max-width:600px){
+  .match {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "teamA"
+      "teamB"
+      "vs"
+      "status";
+  }
+  .match .teamB {
+    align-items:flex-start;
+    text-align:left;
+  }
+  .match .vs {
+    justify-self:flex-start;
+  }
+}
+.tiny { font-size:.85rem; opacity:.9; }
+.hr { height:1px; background:#1e2430; margin:12px 0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.winner { color:#8ef39a; font-weight:600; }
+.bracket-col { display:grid; gap:8px; }
+.bracket-row { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; }
+.slot { padding:8px; border:1px dashed #2a3442; border-radius:10px; min-height:68px; }
+.center { display:flex; justify-content:center; align-items:center; }
+.note { background:#142033; border-left:3px solid #2e7dff; padding:8px 12px; border-radius:6px; }
+a { color:#9cc4ff; }
+details { margin-top:8px; }
+summary { cursor:pointer; }
+.pass { color:#8ef39a; }
+.fail { color:#ffb88f; }
+
+/* Mobile & tablet friendly tweaks */
+html { -webkit-text-size-adjust: 100%; }
+* { -webkit-tap-highlight-color: transparent; }
+input, select, button { font-size: 16px; } /* prevent iOS zoom on focus */
+button, input, select { min-height: 44px; } /* comfy touch targets */
+
+/* Tables scroll horizontally on small screens */
+.table-wrap { overflow-x: auto; }
+.table { min-width: 520px; }
+
+/* Match row inputs/selects sizing */
+.match select { min-width: 140px; }
+.match input[type="number"] { width: 84px; }
+
+
+
+/* Bracket grid responsiveness */
+@media (max-width: 1024px) {
+  .wrap { padding: 8px; }
+  .bracket-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .row { gap: 6px; }
+  .card { padding: 12px; }
+  .match { gap: 6px; }
+  .match select { min-width: 120px; }
+  .match input[type="number"] { width: 72px; }
+  .table { min-width: 460px; }
+}
+/* On phones/small tablets, bracket turns into a horizontal scroller */
+@media (max-width: 600px) {
+  .bracket-row { 
+    grid-auto-flow: column; 
+    grid-auto-columns: 85%;
+    grid-template-columns: none; 
+    overflow-x: auto; 
+    -webkit-overflow-scrolling: touch; 
+    gap: 10px;
+    padding-bottom: 6px;
+  }
+  .bracket-col { min-width: 100%; }
+}
+
+/* Fine-tune controls and layout on narrow viewports */
+@media (max-width: 480px) {
+  body { padding: 12px; }
+  .wrap { gap: 12px; }
+  h1 { font-size: 1.35rem; }
+  h2 { font-size: 1.1rem; }
+  h3 { font-size: 1rem; }
+  .muted { font-size: .85rem; }
+  button { padding: 10px 12px; }
+  input[type="text"] { width: 100%; box-sizing: border-box; }
+  #teamsCard .row { width: 100%; }
+}
+
+/* Larger checkbox for touch */
+input[type="checkbox"] { width: 20px; height: 20px; }
