@@ -32,6 +32,7 @@ var state = {
 };
 var nextTeamId = 1;
 
+
 /*****************************
  * Helpers
  *****************************/
@@ -55,6 +56,30 @@ function buildSelect(id, withBye, placeholder){
   return s;
 }
 
+function syncUIStateFromState(){
+  // Do we have a schedule? If yes, user should be able to finalize pool.
+  var hasSchedule = Array.isArray(state.schedule) && state.schedule.length > 0;
+
+  // Has pool already been finalized? (rankings locked)
+  var poolComplete = Array.isArray(state.rankings) && state.rankings.length > 0;
+
+  // Bracket already built?
+  var hasBracket = !!state.bracket;
+
+  // Finalize pool button:
+  var finalizeBtn = document.querySelector('#finalizePool');
+  if (finalizeBtn) {
+    finalizeBtn.disabled = !hasSchedule;
+  }
+
+  // Build bracket button:
+  var buildBtn = document.querySelector('#buildBracket');
+  if (buildBtn) {
+    // If the pool is already finalized (rankings exist), they should be allowed to build bracket.
+    // If bracket already exists, we can keep it enabled too.
+    buildBtn.disabled = !(poolComplete || hasBracket);
+  }
+}
 
 
 
@@ -171,8 +196,9 @@ function createSchedule(roundCount){ // roundCount optional; when omitted we aut
   state.standings = []; state.rankings = [];
   renderSchedule();
   renderStandings();
-  el('#finalizePool').disabled = false;
+  syncUIStateFromState();
   persist();
+
 }
 
 /* Eligibility helpers (manual assist) */
@@ -774,10 +800,14 @@ function renderBracket(){
 /*****************************
  * Wire up UI & Session controls
  *****************************/
-document.addEventListener('DOMContentLoaded', function(){
-  if(loadPersisted()){
-    renderTeams(); renderSchedule(); renderStandings(); renderBracket();
-  }
+if (loadPersisted()){
+  renderTeams();
+  renderSchedule();
+  renderStandings();
+  renderBracket();
+  syncUIStateFromState(); // <-- add this
+}
+
 
   // Export / Import / Start fresh
   el('#exportBtn').addEventListener('click', function(){
@@ -786,13 +816,33 @@ document.addEventListener('DOMContentLoaded', function(){
   });
   el('#importBtn').addEventListener('click', function(){ el('#importFile').click(); });
   el('#importFile').addEventListener('change', function(e){
-    var f = e.target.files && e.target.files[0]; if(!f) return;
-    var reader = new FileReader(); reader.onload = function(){
-      try{ var data = JSON.parse(String(reader.result)); if(!data || !data.state) throw new Error('Bad file');
-        state = data.state; nextTeamId = data.nextTeamId || 1; persist(); renderTeams(); renderSchedule(); renderStandings(); renderBracket();
-      }catch(err){ alert('Invalid JSON.'); }
-    }; reader.readAsText(f);
-  });
+  var f = e.target.files && e.target.files[0];
+  if(!f) return;
+
+  var reader = new FileReader();
+  reader.onload = function(){
+    try {
+      var data = JSON.parse(String(reader.result));
+      if(!data || !data.state) throw new Error('Bad file');
+
+      state = data.state;
+      nextTeamId = data.nextTeamId || 1;
+
+      persist();
+
+      renderTeams();
+      renderSchedule();
+      renderStandings();
+      renderBracket();
+      syncUIStateFromState(); // <-- add this
+
+    } catch(err){
+      alert('Invalid JSON.');
+    }
+  };
+  reader.readAsText(f);
+});
+
   el('#freshBtn').addEventListener('click', function(){ if(!confirm('Start fresh? This clears the saved session.')) return; clearPersisted(); location.reload(); });
 
   // Team form submit handles both Enter and the Add Team button
@@ -820,7 +870,6 @@ document.addEventListener('DOMContentLoaded', function(){
   // Tests
   el('#runTests').addEventListener('click', runTests);
   renderTeams();
-});
 
 /*****************************
  * Tests (basic, visible in console)
