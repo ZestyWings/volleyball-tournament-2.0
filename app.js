@@ -28,7 +28,9 @@ var state = {
   schedule: [], // [{round, matches:[{a,b,aScore,bScore,winnerId,diff,played,isBye}], bye:{a,b}}]
   standings: [],
   rankings: [],
-  bracket: null
+  bracket: null,
+  // When true, pool schedule is being built in manual mode.
+  manualSchedule: false
 };
 var nextTeamId = 1;
 
@@ -150,6 +152,9 @@ function createSchedule(roundCount){ // roundCount optional; when omitted we aut
   if(poolTeams.length < 2){ alert('Need at least 2 teams.'); return; }
   var ids = poolTeams.map(function(t){return t.id;});
   var manual = el('#manualMode').checked;
+
+  // Track manual vs auto schedule so render logic can keep dropdowns editable.
+  state.manualSchedule = !!manual;
 
   var fmt = computeFormat(poolTeams.length);
   var autoMode = !roundCount && fmt;
@@ -347,24 +352,75 @@ function updateManualMatchOnChange(roundNo, idx){
   var bSel = el('#bSel-'+roundNo+'-'+idx);
   var aVal = aSel && aSel.value ? aSel.value : '';
   var bVal = bSel && bSel.value ? bSel.value : '';
-  if(!aVal || !bVal) return;
-  if(aVal === bVal) return;
+
+  // If either side is blank, treat this match as not set yet.
+  if(!aVal || !bVal){
+    m.a = null; m.b = null;
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+    persist();
+    return;
+  }
+
+  if(aVal === bVal){
+    // Prevent same team on both sides. Reset the most recently changed dropdown.
+    if (aSel && bSel) {
+      // Prefer clearing B if it matches A, since B is commonly changed second.
+      bSel.value = '';
+    }
+    m.a = null; m.b = null;
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+    persist();
+    return;
+  }
 
   var aId = aVal==='BYE' ? 'BYE' : parseInt(aVal,10);
   var bId = bVal==='BYE' ? 'BYE' : parseInt(bVal,10);
-  if(aId === 'BYE' || bId === 'BYE') return; // BYE only on the bye row
+  if(aId === 'BYE' || bId === 'BYE'){
+    // BYE is only valid on the dedicated bye row.
+    if (aSel) aSel.value = '';
+    if (bSel) bSel.value = '';
+    m.a = null; m.b = null;
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+    persist();
+    return;
+  }
 
   // Don’t allow conflict with bye or double-use this round
-  if (r.bye && (aId===r.bye.a || aId===r.bye.b || bId===r.bye.a || bId===r.bye.b)) return;
+  if (r.bye && (aId===r.bye.a || aId===r.bye.b || bId===r.bye.a || bId===r.bye.b)){
+    if (aSel) aSel.value = '';
+    if (bSel) bSel.value = '';
+    m.a = null; m.b = null;
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+    persist();
+    return;
+  }
   var used = new Set();
   r.matches.forEach(function(mm, i){
     if(mm.isBye || i===idx) return;
     if(mm.a!=null) used.add(mm.a);
     if(mm.b!=null) used.add(mm.b);
   });
-  if(used.has(aId) || used.has(bId)) return;
+  if(used.has(aId) || used.has(bId)){
+    if (aSel) aSel.value = '';
+    if (bSel) bSel.value = '';
+    m.a = null; m.b = null;
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+    persist();
+    return;
+  }
 
-  m.a = aId; m.b = bId; // persist pairing
+  // If the teams changed, clear any typed scores because they belong to the old pairing.
+  var teamsChanged = (m.a!==aId) || (m.b!==bId);
+  m.a = aId; m.b = bId;
+  if (teamsChanged){
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+  }
   persist();
 }
 
@@ -459,10 +515,16 @@ function renderSchedule(){
        *   <div class="vs">vs</div>
        *   <div class="teamB"> [Team B select or name] [B score below] </div>
        **********************/
-      if (m.a===null || m.b===null){
-        // Manual mode: still picking teams
+      var keepEditable = !!state.manualSchedule && !m.played;
+
+      if (keepEditable){
+        // Manual schedule: keep teams editable until the round is saved.
         var aSel = buildSelect('aSel-'+r.round+'-'+idx, true, 'Pick team A');
         var bSel = buildSelect('bSel-'+r.round+'-'+idx, true, 'Pick team B');
+
+        // Restore any existing picks
+        if (m.a!=null) aSel.value = String(m.a);
+        if (m.b!=null) bSel.value = String(m.b);
 
         // Team A column = dropdown then A's score box under it
         var teamABox = create('div', { class:'teamA' }, [
@@ -493,6 +555,21 @@ function renderSchedule(){
         });
 
         if (typeof applyEligibilityForRow === 'function') applyEligibilityForRow(r.round, idx);
+
+      } else if (m.a==null || m.b==null) {
+        // In auto schedule, this should not happen, but keep a safe fallback.
+        var teamABoxEmpty = create('div', { class:'teamA' }, [
+          create('div', { class:'mono muted' }, 'Pick teams'),
+          aIn
+        ]);
+        var teamBBoxEmpty = create('div', { class:'teamB' }, [
+          create('div', { class:'mono muted' }, 'Pick teams'),
+          bIn
+        ]);
+        var vsBoxEmpty = create('div', { class:'vs mono' }, 'vs');
+        row.appendChild(teamABoxEmpty);
+        row.appendChild(vsBoxEmpty);
+        row.appendChild(teamBBoxEmpty);
 
       } else {
         // Locked pairing: names instead of dropdowns
@@ -536,6 +613,15 @@ function renderSchedule(){
       persist();
     });
     wrap.appendChild(saveRoundBtn);
+
+    if (state.manualSchedule) {
+      wrap.appendChild(create('span', { style:'display:inline-block;width:8px;' }, ''));
+      var resetRoundBtn = create('button', { class:'secondary', id:'resetRound-'+r.round }, 'Reset Round ' + r.round);
+      resetRoundBtn.addEventListener('click', function(){
+        resetRoundTeams(r.round);
+      });
+      wrap.appendChild(resetRoundBtn);
+    }
 
     holder.appendChild(wrap);
   });
@@ -607,6 +693,24 @@ function saveRound(roundNo){
   }
   recomputeStandings();
   renderStandings();
+  renderSchedule();
+  persist();
+}
+
+function resetRoundTeams(roundNo){
+  var r = state.schedule.find(function(x){return x.round===roundNo;});
+  if(!r) return;
+
+  r.matches.forEach(function(m){
+    if(m.isBye) return;
+    m.a = null; m.b = null;
+    m.aScore = ''; m.bScore = '';
+    m.winnerId = null; m.diff = 0; m.played = false;
+  });
+
+  // Clear bye picks for this round, if present
+  if(r.bye){ r.bye = { a: null, b: null }; }
+
   renderSchedule();
   persist();
 }
