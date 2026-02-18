@@ -9,7 +9,7 @@
 <body>
   <div class="wrap">
     <h1>Volleyball Tournament Manager</h1>
-    <p class="muted">Vanilla HTML + JS. Team check-in, pool scheduling, scoring, standings, and a 10-seed elimination bracket (1 and 2 get byes). Pool rounds now auto-match the number of teams: 8→4 rounds/4 games, 10→5 rounds/4 games + Bye row, 12→4 rounds/6 games.</p>
+    <p class="muted">Vanilla HTML + JS. Team check-in, pool scheduling, scoring, standings, and a 10-seed elimination bracket (1 and 2 get byes). Pool rounds auto-match the number of teams: 8→4 rounds/4 games, 10→5 rounds/4 games + Bye row, 12→4 rounds/6 games, 14→4 rounds/7 games, 16→4 rounds/8 games (odd counts create a BYE match).</p>
 
     <!-- Session persistence -->
     <section class="card" id="sessionCard">
@@ -31,7 +31,7 @@
         <input id="teamName" type="text" placeholder="Team name" />
         <button id="addTeam" type="submit">Add team</button>
         <button id="clearTeams" type="button" class="secondary">Clear all</button>
-        <span class="muted">Max 12 teams. If odd, a BYE will be added for scheduling.</span>
+        <span class="muted">Max 16 teams. If odd, a BYE will be added for scheduling.</span>
       </form>
       <div class="hr"></div>
       <div class="table-wrap">

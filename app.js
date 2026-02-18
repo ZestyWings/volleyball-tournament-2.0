@@ -90,7 +90,7 @@ function syncUIStateFromState(){
  *****************************/
 function addTeam(name){
   if(!name) return;
-  if(state.teams.length >= 12){ alert('Max 12 teams.'); return; }
+  if(state.teams.length >= 16){ alert('Max 16 teams.'); return; }
   state.teams.push({ id: nextTeamId++, name: String(name).trim(), checked: false, wins: 0, diff: 0 });
   renderTeams(); persist();
 }
@@ -140,9 +140,22 @@ function roundRobinPairings(teamIds){
 
 // Determine rounds & matches per round from team count.
 function computeFormat(teamCount){
-  if(teamCount===8) return { rounds:4, matchesPerRound:4, includeBye:false };
-  if(teamCount===10) return { rounds:5, matchesPerRound:4, includeBye:true };// two teams rest per round via Bye row (manual selectors)
+  // Built-in formats tuned for quick day-of use (few rounds) rather than full round-robin.
+  // 8  -> 4 rounds, 4 matches per round (each team plays 4)
+  // 10 -> 5 rounds, 4 matches per round + a dedicated Bye row (2 teams rest each round, no BYE matches)
+  // 12 -> 4 rounds, 6 matches per round (each team plays 4)
+  // 14 -> 4 rounds, 7 matches per round (each team plays 4)
+  // 15 -> 4 rounds, 8 pairings generated; one will be a BYE match each round
+  // 16 -> 4 rounds, 8 matches per round (each team plays 4)
+  if(teamCount===8)  return { rounds:4, matchesPerRound:4, includeBye:false };
+  if(teamCount===10) return { rounds:5, matchesPerRound:4, includeBye:true };
   if(teamCount===12) return { rounds:4, matchesPerRound:6, includeBye:false };
+
+  // Support 6–16 teams (except 10/12 handled above) by running 4 rounds of round-robin pairings.
+  // matchesPerRound is half the field (rounded up for odd counts, which creates a BYE match).
+  if(teamCount>=6 && teamCount<=16){
+    return { rounds:4, matchesPerRound:Math.ceil(teamCount/2), includeBye:false };
+  }
   return null; // unsupported
 }
 
@@ -159,7 +172,7 @@ function createSchedule(roundCount){ // roundCount optional; when omitted we aut
   var fmt = computeFormat(poolTeams.length);
   var autoMode = !roundCount && fmt;
   if(!roundCount && !fmt){
-    alert('For now, only 8, 10, or 12 teams are supported for auto scheduling. You currently have '+poolTeams.length+'.');
+    alert('For now, auto scheduling supports 6–16 teams (with special handling for 10-team bye rounds). You currently have '+poolTeams.length+'.');
     return;
   }
   var roundsToMake = autoMode ? fmt.rounds : roundCount;
