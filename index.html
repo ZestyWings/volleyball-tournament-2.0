@@ -9,7 +9,7 @@
 <body>
   <div class="wrap">
     <h1>Volleyball Tournament Manager</h1>
-    <p class="muted">Vanilla HTML + JS. Team check-in, pool scheduling, scoring, standings, and a 10-seed elimination bracket (1 and 2 get byes). Pool rounds auto-match the number of teams: 8→4 rounds/4 games, 10→5 rounds/4 games + Bye row, 12→4 rounds/6 games, 14→4 rounds/7 games, 16→4 rounds/8 games (odd counts create a BYE match).</p>
+    <p class="muted">Vanilla HTML + JS. Team check-in, pool scheduling, scoring, standings, and a flexible elimination bracket where you choose how many teams qualify. Pool rounds auto-match the number of teams: 8->4 rounds/4 games, 10->5 rounds/4 games + Bye row, 12->4 rounds/6 games, 14->4 rounds/7 games, 16->4 rounds/8 games (odd counts create a BYE match).</p>
 
     <!-- Session persistence -->
     <section class="card" id="sessionCard">
@@ -31,7 +31,7 @@
         <input id="teamName" type="text" placeholder="Team name" />
         <button id="addTeam" type="submit">Add team</button>
         <button id="clearTeams" type="button" class="secondary">Clear all</button>
-        <span class="muted">Max 16 teams. If odd, a BYE will be added for scheduling.</span>
+        <span class="muted">Max 20 teams. If odd, a BYE will be added for scheduling.</span>
       </form>
       <div class="hr"></div>
       <div class="table-wrap">
@@ -75,9 +75,11 @@
 
     <!-- Bracket -->
     <section class="card" id="bracketCard">
-      <h2>3) Elimination Bracket (10 teams)</h2>
-      <p class="muted">Seeds 1 and 2 receive a first round bye. 7v10 and 8v9 play-in feed the quarterfinals.</p>
+      <h2>3) Elimination Bracket (Flexible)</h2>
+      <p class="muted">After finalizing pool play, choose how many top-ranked teams enter the bracket. BYEs are auto-assigned when needed.</p>
       <div class="row">
+        <label for="bracketTeamCount" class="muted">Bracket teams:</label>
+        <input id="bracketTeamCount" type="number" min="2" max="20" value="10" />
         <button id="buildBracket" disabled>Build bracket from rankings</button>
         <button id="resetBracket" class="secondary">Reset bracket</button>
       </div>
@@ -91,6 +93,10 @@
     <!-- Test runner (optional) -->
     <section class="card" id="testsCard">
       <h2>4) Built-in tests</h2>
+      <div class="row" style="margin-bottom:8px;">
+        <label for="testTeamCount" class="muted">Teams in test scenarios:</label>
+        <input id="testTeamCount" type="number" min="8" max="20" value="10" />
+      </div>
       <button id="runTests" class="secondary">Run tests (see console)</button>
       <details>
         <summary>What is covered</summary>
@@ -106,9 +112,10 @@
       <div id="testResults" class="tiny"></div>
     </section>
 
-    <footer class="muted tiny">© Tournament Helper — multi-file demo. MIT license. Built for quick on-site use.</footer>
+    <footer class="muted tiny">(c) Tournament Helper - multi-file demo. MIT license. Built for quick on-site use.</footer>
   </div>
 
   <script src="app.js"></script>
 </body>
 </html>
+

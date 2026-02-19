@@ -14,7 +14,7 @@ function loadPersisted(){
     var raw = localStorage.getItem(STORAGE_KEY); if(!raw) return false;
     var data = JSON.parse(raw);
     if(!data || !data.state) return false;
-    state = data.state; nextTeamId = data.nextTeamId || 1;
+    state = data.state; nextTeamId = data.nextTeamId || 1; if(typeof state.bracketTeamCount !== 'number') state.bracketTeamCount = 10;
     return true;
   }catch(e){ console.warn('Load failed', e); return false; }
 }
@@ -28,11 +28,13 @@ var state = {
   schedule: [], // [{round, matches:[{a,b,aScore,bScore,winnerId,diff,played,isBye}], bye:{a,b}}]
   standings: [],
   rankings: [],
+  bracketTeamCount: 10,
   bracket: null,
   // When true, pool schedule is being built in manual mode.
   manualSchedule: false
 };
 var nextTeamId = 1;
+var bracketResizeBound = false;
 
 
 /*****************************
@@ -47,7 +49,7 @@ function create(tag, props, children){
   arr.forEach(function(c){ n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
   return n;
 }
-function teamName(id){ if(id==='BYE') return 'BYE'; var t=state.teams.find(function(x){return x.id===id;}); return t? t.name : '—'; }
+function teamName(id){ if(id==='BYE') return 'BYE'; var t=state.teams.find(function(x){return x.id===id;}); return t? t.name : '-'; }
 function buildSelect(id, withBye, placeholder){
   var s = create('select', { id:id });
   if(placeholder){
@@ -56,6 +58,53 @@ function buildSelect(id, withBye, placeholder){
   var src = withBye ? state.teams.concat([{id:'BYE', name:'BYE'}]) : state.teams;
   src.forEach(function(t){ s.appendChild(create('option', { value:String(t.id) }, t.name)); });
   return s;
+}
+function getMaxBracketTeams(){
+  if(Array.isArray(state.rankings) && state.rankings.length > 0) return state.rankings.length;
+  if(state.bracket && typeof state.bracket.qualifiers === 'number') return state.bracket.qualifiers;
+  return state.teams.length;
+}
+function clampBracketTeamCount(value, maxCount){
+  var limit = Math.max(2, maxCount || 2);
+  var n = parseInt(value, 10);
+  if(Number.isNaN(n)) n = Math.min(10, limit);
+  if(n < 2) n = 2;
+  if(n > limit) n = limit;
+  return n;
+}
+function syncBracketTeamControl(){
+  var input = el('#bracketTeamCount');
+  if(!input) return;
+
+  var maxCount = getMaxBracketTeams();
+  var canChoose = maxCount >= 2;
+  input.disabled = !canChoose;
+  if(!canChoose){
+    input.value = '';
+    return;
+  }
+
+  input.min = '2';
+  input.max = String(maxCount);
+  state.bracketTeamCount = clampBracketTeamCount(state.bracketTeamCount, maxCount);
+  input.value = String(state.bracketTeamCount);
+}
+function getBracketQualifierCountFromControl(){
+  var maxCount = getMaxBracketTeams();
+  if(maxCount < 2){
+    alert('Need at least 2 teams to build a bracket.');
+    return null;
+  }
+
+  var input = el('#bracketTeamCount');
+  if(!input){
+    return askBracketQualifierCount(Math.min(10, maxCount));
+  }
+
+  var chosen = clampBracketTeamCount(input.value, maxCount);
+  state.bracketTeamCount = chosen;
+  input.value = String(chosen);
+  return chosen;
 }
 
 function syncUIStateFromState(){
@@ -81,6 +130,7 @@ function syncUIStateFromState(){
     // If bracket already exists, we can keep it enabled too.
     buildBtn.disabled = !(poolComplete || hasBracket);
   }
+  syncBracketTeamControl();
 }
 
 
@@ -90,7 +140,7 @@ function syncUIStateFromState(){
  *****************************/
 function addTeam(name){
   if(!name) return;
-  if(state.teams.length >= 16){ alert('Max 16 teams.'); return; }
+  if(state.teams.length >= 20){ alert('Max 20 teams.'); return; }
   state.teams.push({ id: nextTeamId++, name: String(name).trim(), checked: false, wins: 0, diff: 0 });
   renderTeams(); persist();
 }
@@ -151,9 +201,9 @@ function computeFormat(teamCount){
   if(teamCount===10) return { rounds:5, matchesPerRound:4, includeBye:true };
   if(teamCount===12) return { rounds:4, matchesPerRound:6, includeBye:false };
 
-  // Support 6–16 teams (except 10/12 handled above) by running 4 rounds of round-robin pairings.
+  // Support 6-20 teams (except 10/12 handled above) by running 4 rounds of round-robin pairings.
   // matchesPerRound is half the field (rounded up for odd counts, which creates a BYE match).
-  if(teamCount>=6 && teamCount<=16){
+  if(teamCount>=6 && teamCount<=20){
     return { rounds:4, matchesPerRound:Math.ceil(teamCount/2), includeBye:false };
   }
   return null; // unsupported
@@ -172,7 +222,7 @@ function createSchedule(roundCount){ // roundCount optional; when omitted we aut
   var fmt = computeFormat(poolTeams.length);
   var autoMode = !roundCount && fmt;
   if(!roundCount && !fmt){
-    alert('For now, auto scheduling supports 6–16 teams (with special handling for 10-team bye rounds). You currently have '+poolTeams.length+'.');
+    alert('For now, auto scheduling supports 6-20 teams (with special handling for 10-team bye rounds). You currently have '+poolTeams.length+'.');
     return;
   }
   var roundsToMake = autoMode ? fmt.rounds : roundCount;
@@ -291,7 +341,7 @@ function applyEligibilityForBye(roundNo){
       var disable = taken.has(t.id) || alreadyByed.has(t.id) || (otherVal && String(t.id)===String(otherVal));
       if(disable){
         opt.disabled = true;
-        opt.textContent = '• ' + t.name + (alreadyByed.has(t.id) ? ' (already had bye)' : ' (taken)');
+        opt.textContent = '* ' + t.name + (alreadyByed.has(t.id) ? ' (already had bye)' : ' (taken)');
       }
       sel.appendChild(opt);
     });
@@ -339,7 +389,7 @@ function applyEligibilityForRow(roundNo, idx){
     // Add remaining (disabled)
     state.teams.forEach(function(t){
       if(eligibleIds.indexOf(t.id)===-1){
-        var o = create('option', { value:String(t.id) }, '• '+teamName(t.id)+' (played/taken)'); o.disabled = true; sel.appendChild(o);
+        var o = create('option', { value:String(t.id) }, '* '+teamName(t.id)+' (played/taken)'); o.disabled = true; sel.appendChild(o);
       }
     });
     // restore
@@ -401,7 +451,7 @@ function updateManualMatchOnChange(roundNo, idx){
     return;
   }
 
-  // Don’t allow conflict with bye or double-use this round
+  // Don't allow conflict with bye or double-use this round
   if (r.bye && (aId===r.bye.a || aId===r.bye.b || bId===r.bye.a || bId===r.bye.b)){
     if (aSel) aSel.value = '';
     if (bSel) bSel.value = '';
@@ -470,7 +520,7 @@ function renderSchedule(){
         byeWrap.appendChild(aSelB);
         byeWrap.appendChild(create('span', { class:'mono' }, 'and'));
         byeWrap.appendChild(bSelB);
-        byeWrap.appendChild(create('span', { class:'muted tiny' }, ' — these two teams rest; no scores recorded'));
+        byeWrap.appendChild(create('span', { class:'muted tiny' }, ' - these two teams rest; no scores recorded'));
 
         // (optional assist) keep bye dropdowns legal and auto-save when both chosen
         if (typeof applyEligibilityForBye === 'function') {
@@ -773,156 +823,538 @@ function finalizePool(){
       if(!m.played) return alert('Round '+r.round+' has an unsaved match. Use "Save Round '+r.round+'".');
     }
   }
+
   recomputeStandings();
   state.rankings = state.standings.map(function(s){return s.id;});
-  alert('Pool complete. Rankings locked. You can now build the bracket.');
+  state.bracketTeamCount = clampBracketTeamCount(state.bracketTeamCount, state.rankings.length);
+  state.bracket = null;
+  el('#bracket').innerHTML='';
+  el('#champion').innerHTML='';
+  syncBracketTeamControl();
+
+  alert('Pool complete. Rankings locked. Set bracket teams, then build the bracket.');
   el('#buildBracket').disabled = false;
   persist();
 }
 
 /*****************************
- * 3) Elimination bracket (10 teams)
+ * 3) Elimination bracket (flexible qualifiers)
  *****************************/
+function nextPowerOfTwo(n){
+  var size = 1;
+  while(size < n) size *= 2;
+  return size;
+}
+function traditionalSeedOrder(size){
+  if(size===2) return [1,2];
+  var prev = traditionalSeedOrder(size/2);
+  var out = [];
+  prev.forEach(function(seed){
+    out.push(seed);
+    out.push(size + 1 - seed);
+  });
+  return out;
+}
+function getRoundLabel(teamsInRound){
+  if(teamsInRound===2) return 'Final';
+  if(teamsInRound===4) return 'Semifinals';
+  if(teamsInRound===8) return 'Quarterfinals';
+  return 'Round of '+teamsInRound;
+}
+function allBracketMatches(){
+  if(!state.bracket || !Array.isArray(state.bracket.rounds)) return [];
+  var out = [];
+  state.bracket.rounds.forEach(function(round){
+    round.matches.forEach(function(m){ out.push(m); });
+  });
+  return out;
+}
+function findBracketMatch(matchId){
+  return allBracketMatches().find(function(m){ return m.id===matchId; }) || null;
+}
+function ensureFinalSets(match){
+  if(!match.sets || !Array.isArray(match.sets) || match.sets.length!==3){
+    match.sets = [{a:'',b:''},{a:'',b:''},{a:'',b:''}];
+  }
+}
+function clearMatchResult(match){
+  match.winner = null;
+  match.aScore = '';
+  match.bScore = '';
+  if(match.sets){
+    match.sets = [{a:'',b:''},{a:'',b:''},{a:'',b:''}];
+  }
+}
+function migrateLegacyBracketIfNeeded(){
+  if(!state.bracket || Array.isArray(state.bracket.rounds)) return;
+  if(Array.isArray(state.bracket.playins) && Array.isArray(state.bracket.quarters) && Array.isArray(state.bracket.semis) && state.bracket.final){
+    var legacy = state.bracket;
+    ensureFinalSets(legacy.final);
+    var qualifiers = state.bracketTeamCount || 10;
+    var seedByTeamId = {};
+    state.rankings.slice(0, qualifiers).forEach(function(teamId, idx){
+      seedByTeamId[String(teamId)] = idx + 1;
+    });
+    state.bracket = {
+      qualifiers: qualifiers,
+      seedByTeamId: seedByTeamId,
+      rounds: [
+        { id:'R1', title:'Play-in', matches:legacy.playins, isFinal:false },
+        { id:'R2', title:'Quarterfinals', matches:legacy.quarters, isFinal:false },
+        { id:'R3', title:'Semifinals', matches:legacy.semis, isFinal:false },
+        { id:'R4', title:'Final', matches:[legacy.final], isFinal:true }
+      ]
+    };
+  } else {
+    state.bracket = null;
+  }
+}
+function askBracketQualifierCount(defaultCount){
+  var maxCount = state.standings.length || state.rankings.length;
+  if(maxCount < 2){
+    alert('Need at least 2 teams to build a bracket.');
+    return null;
+  }
+  var suggested = defaultCount || 10;
+  if(suggested > maxCount) suggested = maxCount;
+  if(suggested < 2) suggested = 2;
+
+  while(true){
+    var raw = prompt('How many teams should enter the bracket phase? (2-'+maxCount+')', String(suggested));
+    if(raw===null) return null;
+    var parsed = parseInt(String(raw).trim(), 10);
+    if(!Number.isNaN(parsed) && parsed>=2 && parsed<=maxCount){
+      return parsed;
+    }
+    alert('Enter a whole number from 2 to '+maxCount+'.');
+  }
+}
 function buildBracketFromRankings(){
-  var n = state.rankings.length;
-  if(n < 10) alert('Bracket expects 10 teams. Fewer teams will be padded with BYE.');
-  var seeds = state.rankings.slice(0,10);
-  while(seeds.length < 10) seeds.push('BYE');
-  state.bracket = {
-    playins:[
-      { id:'P1', a:seeds[6], b:seeds[9], aScore:'', bScore:'', winner:null },
-      { id:'P2', a:seeds[7], b:seeds[8], aScore:'', bScore:'', winner:null }
-    ],
-    quarters:[
-      { id:'Q1', a:seeds[0], b:{from:'P2'}, aScore:'', bScore:'', winner:null },
-      { id:'Q2', a:seeds[3], b:seeds[4], aScore:'', bScore:'', winner:null },
-      { id:'Q3', a:seeds[2], b:{from:'P1'}, aScore:'', bScore:'', winner:null },
-      { id:'Q4', a:seeds[1], b:seeds[5], aScore:'', bScore:'', winner:null }
-    ],
-    semis:[
-      { id:'S1', a:{from:'Q1'}, b:{from:'Q2'}, aScore:'', bScore:'', winner:null },
-      { id:'S2', a:{from:'Q3'}, b:{from:'Q4'}, aScore:'', bScore:'', winner:null }
-    ],
-    final:{ id:'F', a:{from:'S1'}, b:{from:'S2'}, aScore:'', bScore:'', winner:null, sets:[{a:'',b:''},{a:'',b:''},{a:'',b:''}] }
-  };
+  if(!Array.isArray(state.rankings) || state.rankings.length<2){
+    alert('Finalize pool rankings first.');
+    return;
+  }
+
+  var qualifiers = getBracketQualifierCountFromControl();
+  if(qualifiers===null) return;
+
+  var rankedTeams = state.rankings.slice(0, qualifiers);
+  var seedByTeamId = {};
+  rankedTeams.forEach(function(teamId, idx){ seedByTeamId[String(teamId)] = idx + 1; });
+
+  var bracketSize = nextPowerOfTwo(rankedTeams.length);
+  var seeds = rankedTeams.slice();
+  while(seeds.length < bracketSize) seeds.push('BYE');
+  var seedOrder = traditionalSeedOrder(bracketSize);
+  var positionedSeeds = seedOrder.map(function(seedNumber){
+    return seeds[seedNumber - 1] || 'BYE';
+  });
+
+  var rounds = [];
+  var roundCount = Math.log2(bracketSize);
+
+  for(var r=1; r<=roundCount; r++){
+    var teamsInRound = bracketSize / Math.pow(2, r-1);
+    var matchCount = teamsInRound / 2;
+    var matches = [];
+
+    for(var m=0; m<matchCount; m++){
+      var matchId = 'R'+r+'M'+(m+1);
+      var match = { id:matchId, aScore:'', bScore:'', winner:null };
+
+      if(r===1){
+        match.a = positionedSeeds[m*2];
+        match.b = positionedSeeds[m*2+1];
+      } else {
+        match.a = { from: rounds[r-2].matches[m*2].id };
+        match.b = { from: rounds[r-2].matches[m*2+1].id };
+      }
+
+      if(r===roundCount){
+        match.sets = [{a:'',b:''},{a:'',b:''},{a:'',b:''}];
+      }
+      matches.push(match);
+    }
+
+    rounds.push({
+      id: 'R'+r,
+      title: getRoundLabel(teamsInRound),
+      matches: matches,
+      isFinal: (r===roundCount)
+    });
+  }
+
+  state.bracket = { qualifiers: qualifiers, seedByTeamId: seedByTeamId, rounds: rounds };
+  normalizeBracketProgress();
   renderBracket();
   persist();
 }
 function resolveEntry(entry){
   if(entry==='BYE') return 'BYE';
   if(typeof entry==='number') return teamName(entry);
-  if(entry && entry.from){ var w = findWinner(entry.from); return w? w : ('Winner of '+entry.from); }
-  return '—';
+  if(entry && entry.from){
+    var w = findWinner(entry.from);
+    return w ? w : ('Winner of '+entry.from);
+  }
+  return '-';
+}
+function getSeedForEntry(entry){
+  if(!state.bracket || !state.bracket.seedByTeamId) return '';
+  var teamId = getEntryId(entry);
+  if(typeof teamId!=='number') return '';
+  return state.bracket.seedByTeamId[String(teamId)] || '';
 }
 function findWinner(id){
-  var b = state.bracket; var all = b.playins.concat(b.quarters).concat(b.semis).concat([b.final]);
-  var m = all.find(function(x){return x.id===id;}); if(!m || !m.winner) return null; return teamName(m.winner) || 'BYE';
+  var m = findBracketMatch(id);
+  if(!m || m.winner==null) return null;
+  if(m.winner==='BYE') return 'BYE';
+  return teamName(m.winner);
 }
-function isByeEntry(entry){ return entry==='BYE'; }
+function isByeEntry(entry){ return getEntryId(entry)==='BYE'; }
 function getEntryId(entry){
   if(typeof entry==='number') return entry;
   if(entry==='BYE') return 'BYE';
   if(entry && entry.from){
-    var b = state.bracket; var find = function(ix){ return b.playins.concat(b.quarters).concat(b.semis).concat([b.final]).find(function(x){ return x.id===ix; }); };
-    var m = find(entry.from); return (m && m.winner) ? m.winner : null;
+    var m = findBracketMatch(entry.from);
+    return (m && m.winner!=null) ? m.winner : null;
   }
   return null;
 }
-function recordBracketScore(stage, idx, aVal, bVal){
-  var st = state.bracket[stage]; var m = Array.isArray(st)? st[idx] : st;
-  if(stage==='final') return; // final handled separately
+function normalizeBracketProgress(){
+  if(!state.bracket || !Array.isArray(state.bracket.rounds)) return;
+
+  state.bracket.rounds.forEach(function(round){
+    round.matches.forEach(function(m){
+      if(round.isFinal) ensureFinalSets(m);
+
+      var aId = getEntryId(m.a);
+      var bId = getEntryId(m.b);
+
+      if(aId==null || bId==null){
+        clearMatchResult(m);
+        return;
+      }
+
+      if(aId==='BYE' && bId==='BYE'){
+        m.winner = 'BYE';
+        m.aScore = '';
+        m.bScore = '';
+        if(m.sets) m.sets = [{a:'',b:''},{a:'',b:''},{a:'',b:''}];
+        return;
+      }
+
+      if(aId==='BYE' && bId!=='BYE'){
+        m.winner = bId;
+        m.aScore = '';
+        m.bScore = '';
+        if(m.sets) m.sets = [{a:'',b:''},{a:'',b:''},{a:'',b:''}];
+        return;
+      }
+      if(bId==='BYE' && aId!=='BYE'){
+        m.winner = aId;
+        m.aScore = '';
+        m.bScore = '';
+        if(m.sets) m.sets = [{a:'',b:''},{a:'',b:''},{a:'',b:''}];
+        return;
+      }
+
+      if(m.winner!=null && m.winner!==aId && m.winner!==bId){
+        clearMatchResult(m);
+      }
+    });
+  });
+}
+function recordBracketScore(matchId, aVal, bVal){
+  var m = findBracketMatch(matchId);
+  if(!m) return;
+
+  normalizeBracketProgress();
+  var aId = getEntryId(m.a);
+  var bId = getEntryId(m.b);
+
+  if(aId==null || bId==null) return alert('This match is waiting on earlier results.');
+  if(aId==='BYE' || bId==='BYE'){
+    normalizeBracketProgress();
+    renderBracket();
+    persist();
+    return;
+  }
+
   var a = parseInt(aVal,10), b = parseInt(bVal,10);
   if(Number.isNaN(a) || Number.isNaN(b) || a<0 || b<0) return alert('Enter valid non negative scores.');
-  m.aScore=a; m.bScore=b;
-  if(isByeEntry(m.a) && !isByeEntry(m.b)) m.winner = getEntryId(m.b);
-  else if(!isByeEntry(m.a) && isByeEntry(m.b)) m.winner = getEntryId(m.a);
-  else if(a===b) return alert('No ties in elimination.');
-  else m.winner = a>b ? getEntryId(m.a) : getEntryId(m.b);
+  if(a===b) return alert('No ties in elimination.');
+
+  m.aScore = a;
+  m.bScore = b;
+  m.winner = (a>b) ? aId : bId;
+
+  normalizeBracketProgress();
   renderBracket();
   persist();
 }
-function recordFinalSets(a1,b1,a2,b2,a3,b3){
-  var m = state.bracket.final;
+function recordFinalSets(matchId, a1,b1,a2,b2,a3,b3){
+  var m = findBracketMatch(matchId);
+  if(!m) return;
+
+  normalizeBracketProgress();
+  var aId = getEntryId(m.a);
+  var bId = getEntryId(m.b);
+  if(aId==null || bId==null) return alert('Final is waiting on semifinal results.');
+
+  if(aId==='BYE' && bId!=='BYE'){
+    m.winner = bId;
+    renderBracket();
+    persist();
+    return;
+  }
+  if(bId==='BYE' && aId!=='BYE'){
+    m.winner = aId;
+    renderBracket();
+    persist();
+    return;
+  }
+
+  ensureFinalSets(m);
   var A = [a1,a2,a3].map(function(x){ return x===''? '' : parseInt(x,10); });
   var B = [b1,b2,b3].map(function(x){ return x===''? '' : parseInt(x,10); });
   if(A[0]==='' || B[0]==='' || A[1]==='' || B[1]==='') return alert('Enter scores for Set 1 and Set 2.');
-  function checkSet(a,b,idx){ if(a===b) throw new Error('Set '+(idx+1)+' cannot be a tie.'); if(Number.isNaN(a)||Number.isNaN(b)||a<0||b<0) throw new Error('Scores must be non-negative numbers.'); }
+
+  function checkSet(a,b,idx){
+    if(a===b) throw new Error('Set '+(idx+1)+' cannot be a tie.');
+    if(Number.isNaN(a) || Number.isNaN(b) || a<0 || b<0) throw new Error('Scores must be non-negative numbers.');
+  }
+
   try{
-    checkSet(A[0],B[0],0); checkSet(A[1],B[1],1);
-    if(A[0]>B[0] && A[1]>B[1]){ m.winner = getEntryId(m.a); }
-    else if(A[0]<B[0] && A[1]<B[1]){ m.winner = getEntryId(m.b); }
+    checkSet(A[0],B[0],0);
+    checkSet(A[1],B[1],1);
+    if(A[0]>B[0] && A[1]>B[1]){ m.winner = aId; }
+    else if(A[0]<B[0] && A[1]<B[1]){ m.winner = bId; }
     else {
-      if(A[2]==='' || B[2]==='') return alert('Match is 1–1. Enter Set 3 scores.');
+      if(A[2]==='' || B[2]==='') return alert('Match is 1-1. Enter Set 3 scores.');
       checkSet(A[2],B[2],2);
-      m.winner = (A[2]>B[2]) ? getEntryId(m.a) : getEntryId(m.b);
+      m.winner = (A[2]>B[2]) ? aId : bId;
     }
   } catch(e){ alert(e.message); return; }
+
   m.sets = [{a:A[0],b:B[0]},{a:A[1],b:B[1]},{a:A[2],b:B[2]}];
   renderBracket();
-  if(m.winner){ el('#champion').innerHTML = '<h2>Champion: <span class="winner">'+teamName(m.winner)+'</span></h2>'; }
   persist();
 }
-function renderBracket(){
-  var b = state.bracket; var box = el('#bracket'); box.innerHTML=''; if(!b) return;
-  function col(title, items, stageKey){
-    var container = create('div', { class:'bracket-col' });
-    container.appendChild(create('h3', {}, title));
-    (Array.isArray(items)? items : [items]).forEach(function(m, idx){
-      var a = resolveEntry(m.a), bName = resolveEntry(m.b);
-      var slot = create('div', { class:'slot' });
+function drawBracketConnectors(){
+  var shell = el('#bracket .bracket-shell');
+  if(!shell || !state.bracket || !Array.isArray(state.bracket.rounds)) return;
 
-      if(stageKey==='final'){
-        slot.appendChild(create('div', { class:'mono' }, a+' vs '+bName));
+  var grid = shell.querySelector('.bracket-grid');
+  var svg = shell.querySelector('.bracket-connectors');
+  if(!grid || !svg) return;
+
+  var rounds = state.bracket.rounds;
+  var rect = grid.getBoundingClientRect();
+  var width = Math.max(1, Math.ceil(rect.width));
+  var height = Math.max(1, Math.ceil(rect.height));
+
+  svg.setAttribute('viewBox', '0 0 '+width+' '+height);
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
+  svg.innerHTML = '';
+
+  if(rounds.length < 2) return;
+
+  function matchMidY(matchEl, fallbackRect){
+    var rows = matchEl.querySelectorAll('.bracket-team-row');
+    if(rows && rows.length >= 2){
+      var r0 = rows[0].getBoundingClientRect();
+      var r1 = rows[1].getBoundingClientRect();
+      var y0 = r0.top + r0.height/2;
+      var y1 = r1.top + r1.height/2;
+      return ((y0 + y1) / 2) - rect.top;
+    }
+    var finalTitle = matchEl.querySelector('.bracket-final-title');
+    if(finalTitle){
+      var ft = finalTitle.getBoundingClientRect();
+      return (ft.top + ft.height/2) - rect.top;
+    }
+    return (fallbackRect.top + fallbackRect.height/2) - rect.top;
+  }
+
+  for(var r=0; r<rounds.length-1; r++){
+    var currentRound = rounds[r];
+    var nextRound = rounds[r+1];
+    for(var i=0; i<currentRound.matches.length; i++){
+      var fromMatch = currentRound.matches[i];
+      var toMatch = nextRound.matches[Math.floor(i/2)];
+      if(!toMatch) continue;
+
+      var src = grid.querySelector('[data-match-id="'+fromMatch.id+'"]');
+      var dst = grid.querySelector('[data-match-id="'+toMatch.id+'"]');
+      if(!src || !dst) continue;
+
+      var sRect = src.getBoundingClientRect();
+      var dRect = dst.getBoundingClientRect();
+      var x1 = sRect.right - rect.left;
+      var y1 = matchMidY(src, sRect);
+      var x4 = dRect.left - rect.left;
+      var y4 = matchMidY(dst, dRect);
+
+      var elbow = x1 + Math.max(24, (x4 - x1) * 0.45);
+      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('class', 'bracket-link');
+      path.setAttribute('d', 'M'+x1+' '+y1+' L'+elbow+' '+y1+' L'+elbow+' '+y4+' L'+x4+' '+y4);
+      svg.appendChild(path);
+    }
+  }
+}
+function renderBracket(){
+  migrateLegacyBracketIfNeeded();
+  normalizeBracketProgress();
+  syncBracketTeamControl();
+
+  var b = state.bracket;
+  var box = el('#bracket');
+  box.innerHTML='';
+  if(!b || !Array.isArray(b.rounds) || b.rounds.length===0) return;
+
+  var shell = create('div', { class:'bracket-shell' });
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'bracket-connectors');
+  svg.setAttribute('aria-hidden', 'true');
+
+  var grid = create('div', { class:'bracket-grid' });
+  var layout = [];
+  var baseStep = 164;
+  var nonFinalAnchor = 52;
+  var finalAnchor = 18;
+  var nonFinalHeight = 124;
+  var finalHeight = 250;
+
+  layout[0] = Array.from({length: b.rounds[0].matches.length}, function(_, i){
+    return (i * baseStep) + nonFinalAnchor;
+  });
+  for(var lr=1; lr<b.rounds.length; lr++){
+    var prev = layout[lr-1];
+    layout[lr] = Array.from({length: b.rounds[lr].matches.length}, function(_, i){
+      return (prev[i*2] + prev[i*2+1]) / 2;
+    });
+  }
+
+  b.rounds.forEach(function(round, roundIdx){
+    var stage = create('section', { class:'bracket-stage' });
+    stage.appendChild(create('h3', { class:'bracket-stage-title sr-only' }, round.title));
+
+    var matchesWrap = create('div', { class:'bracket-stage-matches' });
+    var anchors = layout[roundIdx];
+    var anchorOffset = round.isFinal ? finalAnchor : nonFinalAnchor;
+    var cardHeight = round.isFinal ? finalHeight : nonFinalHeight;
+    var maxAnchor = anchors[anchors.length-1];
+    matchesWrap.style.height = String(Math.ceil(maxAnchor + cardHeight - anchorOffset + 16))+'px';
+
+    round.matches.forEach(function(m, matchIdx){
+      var aName = resolveEntry(m.a);
+      var bName = resolveEntry(m.b);
+      var aSeed = getSeedForEntry(m.a);
+      var bSeed = getSeedForEntry(m.b);
+      var card = create('div', { class:'bracket-match' + (round.isFinal ? ' final' : ''), 'data-match-id': m.id });
+      card.style.position = 'absolute';
+      card.style.top = String(Math.round(anchors[matchIdx] - anchorOffset))+'px';
+      card.style.left = '0';
+
+      card.appendChild(create('div', { class:'bracket-match-id tiny muted' }, round.isFinal ? 'Championship' : m.id));
+
+      if(round.isFinal){
+        ensureFinalSets(m);
+        var finalLeft = (aSeed ? (aSeed+' ') : '') + aName;
+        var finalRight = (bSeed ? (bSeed+' ') : '') + bName;
+        card.appendChild(create('div', { class:'bracket-final-title mono' }, finalLeft+' vs '+finalRight));
+
         var f1a = (m.sets && m.sets[0] && m.sets[0].a!=null ? m.sets[0].a : '');
         var f1b = (m.sets && m.sets[0] && m.sets[0].b!=null ? m.sets[0].b : '');
         var f2a = (m.sets && m.sets[1] && m.sets[1].a!=null ? m.sets[1].a : '');
         var f2b = (m.sets && m.sets[1] && m.sets[1].b!=null ? m.sets[1].b : '');
         var f3a = (m.sets && m.sets[2] && m.sets[2].a!=null ? m.sets[2].a : '');
         var f3b = (m.sets && m.sets[2] && m.sets[2].b!=null ? m.sets[2].b : '');
-        var r1 = create('div', { class:'row' }, [ create('span', { class:'muted tiny' }, 'Set 1'), create('input', { type:'number', min:'0', value:f1a }), create('input', { type:'number', min:'0', value:f1b }) ]);
-        var r2 = create('div', { class:'row' }, [ create('span', { class:'muted tiny' }, 'Set 2'), create('input', { type:'number', min:'0', value:f2a }), create('input', { type:'number', min:'0', value:f2b }) ]);
-        var r3 = create('div', { class:'row' }, [ create('span', { class:'muted tiny' }, 'Set 3 (if needed)'), create('input', { type:'number', min:'0', value:f3a }), create('input', { type:'number', min:'0', value:f3b }) ]);
-        var save = create('button', {}, 'Save Final');
-        save.addEventListener('click', function(){
-          var vals = [r1,r2,r3].map(function(rr){ return Array.from(rr.querySelectorAll('input')).map(function(i){return i.value;}); });
-          recordFinalSets(vals[0][0],vals[0][1],vals[1][0],vals[1][1],vals[2][0],vals[2][1]);
+
+        function finalSetRow(label, aVal, bVal){
+          return create('div', { class:'bracket-set-row' }, [
+            create('span', { class:'muted tiny' }, label),
+            create('input', { type:'number', min:'0', value:aVal }),
+            create('input', { type:'number', min:'0', value:bVal })
+          ]);
+        }
+
+        var s1 = finalSetRow('Set 1', f1a, f1b);
+        var s2 = finalSetRow('Set 2', f2a, f2b);
+        var s3 = finalSetRow('Set 3', f3a, f3b);
+        var saveFinal = create('button', {}, 'Save Final');
+        saveFinal.addEventListener('click', function(){
+          var vals = [s1,s2,s3].map(function(row){ return Array.from(row.querySelectorAll('input')).map(function(i){ return i.value; }); });
+          recordFinalSets(m.id, vals[0][0], vals[0][1], vals[1][0], vals[1][1], vals[2][0], vals[2][1]);
         });
-        var status = create('div', { class:'tiny muted', style:'margin-top:6px;' }, m.winner? ('Winner: '+teamName(m.winner)+' (best of 3)') : '');
-        slot.append(r1,r2,r3,save,status);
+        var finalStatus = create('div', { class:'tiny muted' }, m.winner ? ('Winner: '+teamName(m.winner)+' (best of 3)') : '');
+        var finalControls = create('div', { class:'bracket-controls' }, [s1, s2, s3, saveFinal, finalStatus]);
+        card.appendChild(finalControls);
       } else {
-        var va = (m.aScore!=null? m.aScore : '');
-        var vb = (m.bScore!=null? m.bScore : '');
-        var row1 = create('div', { class:'row' }, [ create('div', { class:'mono' }, a), create('span', { class:'muted tiny' }, 'score'), create('input', { type:'number', min:'0', value:va }) ]);
-        var row2 = create('div', { class:'row' }, [ create('div', { class:'mono' }, bName), create('span', { class:'muted tiny' }, 'score'), create('input', { type:'number', min:'0', value:vb }) ]);
-        var save2 = create('button', {}, 'Save');
-        save2.addEventListener('click', function(){
-          var aVal = row1.querySelector('input').value; var bVal = row2.querySelector('input').value;
-          recordBracketScore(stageKey, Array.isArray(items)? idx : undefined, aVal, bVal);
+        var va = (m.aScore!=null ? m.aScore : '');
+        var vb = (m.bScore!=null ? m.bScore : '');
+
+        var rowA = create('div', { class:'bracket-team-row' }, [
+          create('div', { class:'mono bracket-seed' }, aSeed ? String(aSeed) : ''),
+          create('div', { class:'mono bracket-team-name' }, aName),
+          create('input', { type:'number', min:'0', value:va, class:'bracket-score' })
+        ]);
+        var rowB = create('div', { class:'bracket-team-row' }, [
+          create('div', { class:'mono bracket-seed' }, bSeed ? String(bSeed) : ''),
+          create('div', { class:'mono bracket-team-name' }, bName),
+          create('input', { type:'number', min:'0', value:vb, class:'bracket-score' })
+        ]);
+        var save = create('button', {}, 'Save');
+        save.addEventListener('click', function(){
+          var aVal = rowA.querySelector('input').value;
+          var bVal = rowB.querySelector('input').value;
+          recordBracketScore(m.id, aVal, bVal);
         });
-        var status2 = create('div', { class:'tiny muted', style:'margin-top:6px;' }, m.winner? ('Winner: '+teamName(m.winner)) : '');
-        slot.append(row1,row2,save2,status2);
+        var controls = create('div', { class:'bracket-controls' }, [save]);
+        card.append(rowA, rowB, controls);
       }
-      container.appendChild(slot);
+
+      matchesWrap.appendChild(card);
     });
-    return container;
+
+    stage.appendChild(matchesWrap);
+    grid.appendChild(stage);
+  });
+
+  shell.appendChild(svg);
+  shell.appendChild(grid);
+  box.appendChild(shell);
+
+  if(!bracketResizeBound){
+    window.addEventListener('resize', function(){
+      if(state.bracket) drawBracketConnectors();
+    });
+    bracketResizeBound = true;
   }
-  var grid = create('div', { class:'bracket-row' });
-  grid.appendChild(col('Play in', state.bracket.playins, 'playins'));
-  grid.appendChild(col('Quarterfinals', state.bracket.quarters, 'quarters'));
-  grid.appendChild(col('Semifinals', state.bracket.semis, 'semis'));
-  grid.appendChild(col('Final', state.bracket.final, 'final'));
-  box.appendChild(grid);
+  requestAnimationFrame(drawBracketConnectors);
+
+  var finalRound = b.rounds[b.rounds.length-1];
+  var finalMatch = finalRound && finalRound.matches ? finalRound.matches[0] : null;
+  if(finalMatch && finalMatch.winner && finalMatch.winner!=='BYE'){
+    el('#champion').innerHTML = '<h2>Champion: <span class="winner">'+teamName(finalMatch.winner)+'</span></h2>';
+  } else {
+    el('#champion').innerHTML = '';
+  }
 }
 
 /*****************************
  * Wire up UI & Session controls
  *****************************/
 if (loadPersisted()){
+  if(typeof state.bracketTeamCount !== 'number') state.bracketTeamCount = 10;
+  migrateLegacyBracketIfNeeded();
   renderTeams();
   renderSchedule();
   renderStandings();
   renderBracket();
-  syncUIStateFromState(); // <-- add this
+  syncUIStateFromState();
 }
 
 
@@ -944,6 +1376,8 @@ if (loadPersisted()){
 
       state = data.state;
       nextTeamId = data.nextTeamId || 1;
+      if(typeof state.bracketTeamCount !== 'number') state.bracketTeamCount = 10;
+      migrateLegacyBracketIfNeeded();
 
       persist();
 
@@ -951,7 +1385,7 @@ if (loadPersisted()){
       renderSchedule();
       renderStandings();
       renderBracket();
-      syncUIStateFromState(); // <-- add this
+      syncUIStateFromState();
 
     } catch(err){
       alert('Invalid JSON.');
@@ -970,23 +1404,35 @@ if (loadPersisted()){
   });
   el('#clearTeams').addEventListener('click', function(){
     if(!confirm('Remove all teams?')) return;
-    state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracket=null;
+    state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracketTeamCount=10; state.bracket=null;
     renderTeams(); el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#bracket').innerHTML=''; el('#champion').innerHTML='';
-    el('#buildBracket').disabled=true; el('#finalizePool').disabled=true; persist();
+    el('#buildBracket').disabled=true; el('#finalizePool').disabled=true; syncUIStateFromState(); persist();
   });
 
   // Pool controls
   el('#makeSchedule').addEventListener('click', function(){ createSchedule(); });
-  el('#resetSchedule').addEventListener('click', function(){ state.schedule=[]; state.standings=[]; state.rankings=[]; el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#finalizePool').disabled=true; el('#buildBracket').disabled=true; persist(); });
+  el('#resetSchedule').addEventListener('click', function(){ state.schedule=[]; state.standings=[]; state.rankings=[]; el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#finalizePool').disabled=true; el('#buildBracket').disabled=true; syncUIStateFromState(); persist(); });
   el('#finalizePool').addEventListener('click', finalizePool);
 
   // Bracket controls
+  function onBracketTeamCountChange(){
+    var input = el('#bracketTeamCount');
+    if(!input) return;
+    var maxCount = getMaxBracketTeams();
+    var chosen = clampBracketTeamCount(input.value, maxCount);
+    state.bracketTeamCount = chosen;
+    input.value = String(chosen);
+    persist();
+  }
+  el('#bracketTeamCount').addEventListener('change', onBracketTeamCountChange);
+  el('#bracketTeamCount').addEventListener('input', onBracketTeamCountChange);
   el('#buildBracket').addEventListener('click', buildBracketFromRankings);
-  el('#resetBracket').addEventListener('click', function(){ state.bracket=null; el('#bracket').innerHTML=''; el('#champion').innerHTML=''; persist(); });
+  el('#resetBracket').addEventListener('click', function(){ state.bracket=null; el('#bracket').innerHTML=''; el('#champion').innerHTML=''; syncUIStateFromState(); persist(); });
 
   // Tests
   el('#runTests').addEventListener('click', runTests);
   renderTeams();
+  syncUIStateFromState();
 
 /*****************************
  * Tests (basic, visible in console)
@@ -997,7 +1443,7 @@ function logResult(msg, ok){
   (ok? console.log : console.error)(line.textContent);
 }
 function resetAll(){
-  state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracket=null;
+  state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracketTeamCount=10; state.bracket=null;
   renderTeams();
   el('#poolSchedule').innerHTML='';
   el('#standings').innerHTML='';
@@ -1006,9 +1452,26 @@ function resetAll(){
   el('#buildBracket').disabled=true;
   el('#finalizePool').disabled=true;
   el('#testResults').innerHTML='';
+  syncUIStateFromState();
   clearPersisted();
 }
+function getRequestedTestTeamCount(){
+  var input = el('#testTeamCount');
+  var count = input ? parseInt(input.value,10) : 10;
+  if(Number.isNaN(count)) count = 10;
+  if(count < 8) count = 8;
+  if(count > 20) count = 20;
+  if(input) input.value = String(count);
+  return count;
+}
+function buildTestTeamNames(count){
+  var names = [];
+  for(var i=1;i<=count;i++) names.push('T'+i);
+  return names;
+}
 function runTests(){
+  var testTeamCount = getRequestedTestTeamCount();
+  var testTeamNames = buildTestTeamNames(testTeamCount);
   resetAll();
 
   // Enter/submit adds a team
@@ -1061,7 +1524,7 @@ function runTests(){
   logResult('Finalize blocked when unsaved matches remain', finalizeBlocked===true);
 
   // Rematch prevention (manual schedule)
-  resetAll(); ['A','B','C','D','E','F','G','H','I','J'].forEach(addTeam);
+  resetAll(); testTeamNames.forEach(addTeam);
   el('#manualMode').checked = true; createSchedule(4);
   // Round 1: set a known match A vs B
   el('#aSel-1-0').value = String(state.teams[0].id);
@@ -1084,7 +1547,7 @@ function runTests(){
   logResult('Rematch prevention enforced across rounds', rematchBlocked===true);
 
   // Auto-schedule flow to finish bracket path quickly
-  resetAll(); ['A','B','C','D','E','F','G','H','I','J'].forEach(addTeam);
+  resetAll(); testTeamNames.forEach(addTeam);
   el('#manualMode').checked = false; createSchedule(4);
   state.schedule.forEach(function(r){
     r.matches.forEach(function(m, mi){
@@ -1092,16 +1555,31 @@ function runTests(){
     });
     saveRound(r.round);
   });
-  finalizePool(); buildBracketFromRankings();
-  function simpleAdvance(list, key){ list.forEach(function(mm, i){ if(mm.winner) return; recordBracketScore(key, i, 21, 19); }); }
-  simpleAdvance(state.bracket.playins,'playins'); simpleAdvance(state.bracket.quarters,'quarters'); simpleAdvance(state.bracket.semis,'semis');
+  var qualifierCount = Math.max(2, Math.min(8, testTeamCount));
+  el('#bracketTeamCount').value = String(qualifierCount);
+  finalizePool();
+  el('#bracketTeamCount').value = String(qualifierCount);
+
+  buildBracketFromRankings();
+  state.bracket.rounds.forEach(function(round){
+    if(round.isFinal) return;
+    round.matches.forEach(function(mm){
+      if(mm.winner) return;
+      var aId = getEntryId(mm.a);
+      var bId = getEntryId(mm.b);
+      if(aId==null || bId==null) return;
+      if(aId==='BYE' || bId==='BYE') return;
+      recordBracketScore(mm.id, 21, 19);
+    });
+  });
   renderBracket();
   // Final best-of-3: 2-0
   var finalCol = el('#bracket');
-  var inputs = finalCol.querySelectorAll('.bracket-col:last-child input');
+  var inputs = finalCol.querySelectorAll('.bracket-stage:last-child input');
   inputs[0].value='25'; inputs[1].value='22'; // Set 1
   inputs[2].value='25'; inputs[3].value='23'; // Set 2
-  finalCol.querySelector('.bracket-col:last-child button').click();
+  finalCol.querySelector('.bracket-stage:last-child button').click();
   var champSet = !!el('#champion').textContent.includes('Champion');
   logResult('Final best-of-3 determines champion with 2-0', champSet===true);
 }
+
