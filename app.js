@@ -35,6 +35,7 @@ var state = {
 };
 var nextTeamId = 1;
 var bracketResizeBound = false;
+var bracketModalEscHandler = null;
 
 
 /*****************************
@@ -210,8 +211,8 @@ function computeFormat(teamCount){
 }
 
 function createSchedule(roundCount){ // roundCount optional; when omitted we auto-pick from team count
-  var poolTeams = state.teams.filter(function(t){return t.checked;});
-  if(poolTeams.length===0) poolTeams = state.teams.slice();
+  // Always schedule all registered teams for pool play.
+  var poolTeams = state.teams.slice();
   if(poolTeams.length < 2){ alert('Need at least 2 teams.'); return; }
   var ids = poolTeams.map(function(t){return t.id;});
   var manual = el('#manualMode').checked;
@@ -1064,25 +1065,46 @@ function normalizeBracketProgress(){
     });
   });
 }
+function getBracketRoundContext(matchId){
+  if(!state.bracket || !Array.isArray(state.bracket.rounds)) return null;
+  for(var r=0; r<state.bracket.rounds.length; r++){
+    var round = state.bracket.rounds[r];
+    for(var m=0; m<round.matches.length; m++){
+      if(round.matches[m].id===matchId){
+        return { round: round, roundIndex: r, match: round.matches[m], matchIndex: m };
+      }
+    }
+  }
+  return null;
+}
 function recordBracketScore(matchId, aVal, bVal){
   var m = findBracketMatch(matchId);
-  if(!m) return;
+  if(!m) return false;
 
   normalizeBracketProgress();
   var aId = getEntryId(m.a);
   var bId = getEntryId(m.b);
 
-  if(aId==null || bId==null) return alert('This match is waiting on earlier results.');
+  if(aId==null || bId==null){
+    alert('This match is waiting on earlier results.');
+    return false;
+  }
   if(aId==='BYE' || bId==='BYE'){
     normalizeBracketProgress();
     renderBracket();
     persist();
-    return;
+    return true;
   }
 
   var a = parseInt(aVal,10), b = parseInt(bVal,10);
-  if(Number.isNaN(a) || Number.isNaN(b) || a<0 || b<0) return alert('Enter valid non negative scores.');
-  if(a===b) return alert('No ties in elimination.');
+  if(Number.isNaN(a) || Number.isNaN(b) || a<0 || b<0){
+    alert('Enter valid non negative scores.');
+    return false;
+  }
+  if(a===b){
+    alert('No ties in elimination.');
+    return false;
+  }
 
   m.aScore = a;
   m.bScore = b;
@@ -1091,33 +1113,40 @@ function recordBracketScore(matchId, aVal, bVal){
   normalizeBracketProgress();
   renderBracket();
   persist();
+  return true;
 }
 function recordFinalSets(matchId, a1,b1,a2,b2,a3,b3){
   var m = findBracketMatch(matchId);
-  if(!m) return;
+  if(!m) return false;
 
   normalizeBracketProgress();
   var aId = getEntryId(m.a);
   var bId = getEntryId(m.b);
-  if(aId==null || bId==null) return alert('Final is waiting on semifinal results.');
+  if(aId==null || bId==null){
+    alert('Final is waiting on semifinal results.');
+    return false;
+  }
 
   if(aId==='BYE' && bId!=='BYE'){
     m.winner = bId;
     renderBracket();
     persist();
-    return;
+    return true;
   }
   if(bId==='BYE' && aId!=='BYE'){
     m.winner = aId;
     renderBracket();
     persist();
-    return;
+    return true;
   }
 
   ensureFinalSets(m);
   var A = [a1,a2,a3].map(function(x){ return x===''? '' : parseInt(x,10); });
   var B = [b1,b2,b3].map(function(x){ return x===''? '' : parseInt(x,10); });
-  if(A[0]==='' || B[0]==='' || A[1]==='' || B[1]==='') return alert('Enter scores for Set 1 and Set 2.');
+  if(A[0]==='' || B[0]==='' || A[1]==='' || B[1]===''){
+    alert('Enter scores for Set 1 and Set 2.');
+    return false;
+  }
 
   function checkSet(a,b,idx){
     if(a===b) throw new Error('Set '+(idx+1)+' cannot be a tie.');
@@ -1130,15 +1159,158 @@ function recordFinalSets(matchId, a1,b1,a2,b2,a3,b3){
     if(A[0]>B[0] && A[1]>B[1]){ m.winner = aId; }
     else if(A[0]<B[0] && A[1]<B[1]){ m.winner = bId; }
     else {
-      if(A[2]==='' || B[2]==='') return alert('Match is 1-1. Enter Set 3 scores.');
+      if(A[2]==='' || B[2]===''){
+        alert('Match is 1-1. Enter Set 3 scores.');
+        return false;
+      }
       checkSet(A[2],B[2],2);
       m.winner = (A[2]>B[2]) ? aId : bId;
     }
-  } catch(e){ alert(e.message); return; }
+  } catch(e){
+    alert(e.message);
+    return false;
+  }
 
   m.sets = [{a:A[0],b:B[0]},{a:A[1],b:B[1]},{a:A[2],b:B[2]}];
   renderBracket();
   persist();
+  return true;
+}
+function closeBracketScoreModal(){
+  var backdrop = el('#scoreModalBackdrop');
+  if(backdrop && backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+  document.body.classList.remove('modal-open');
+  if(bracketModalEscHandler){
+    document.removeEventListener('keydown', bracketModalEscHandler);
+    bracketModalEscHandler = null;
+  }
+}
+function openBracketScoreModal(matchId){
+  normalizeBracketProgress();
+  var ctx = getBracketRoundContext(matchId);
+  if(!ctx) return;
+  var round = ctx.round;
+  var m = ctx.match;
+
+  closeBracketScoreModal();
+
+  var aId = getEntryId(m.a);
+  var bId = getEntryId(m.b);
+  var aName = resolveEntry(m.a);
+  var bName = resolveEntry(m.b);
+  var aSeed = getSeedForEntry(m.a);
+  var bSeed = getSeedForEntry(m.b);
+
+  var backdrop = create('div', { class:'score-modal-backdrop', id:'scoreModalBackdrop' });
+  var modal = create('div', { class:'score-modal', role:'dialog', 'aria-modal':'true', 'aria-labelledby':'scoreModalTitle' });
+
+  var head = create('div', { class:'score-modal-head' }, [
+    create('div', { class:'score-modal-title mono', id:'scoreModalTitle' }, (round.isFinal ? 'Final' : round.title)+' - '+m.id),
+    create('button', { type:'button', class:'score-modal-close secondary', 'aria-label':'Close' }, 'x')
+  ]);
+  head.querySelector('button').addEventListener('click', closeBracketScoreModal);
+
+  var tabs = create('div', { class:'score-modal-tabs' }, [
+    create('div', { class:'score-modal-tab' }, 'Match Info'),
+    create('div', { class:'score-modal-tab active' }, 'Report Scores')
+  ]);
+
+  var body = create('div', { class:'score-modal-body' });
+  body.appendChild(create('div', { class:'score-match-meta tiny muted' }, (round.isFinal ? 'Best of 3 sets' : 'Single elimination match')));
+
+  var canSubmit = true;
+  if(aId==null || bId==null){
+    canSubmit = false;
+    body.appendChild(create('div', { class:'score-modal-note' }, 'This match is waiting on earlier round results.'));
+  } else if(aId==='BYE' && bId==='BYE'){
+    canSubmit = false;
+    body.appendChild(create('div', { class:'score-modal-note' }, 'Both entries are BYE. No score entry required.'));
+  } else if(aId==='BYE' || bId==='BYE'){
+    canSubmit = false;
+    body.appendChild(create('div', { class:'score-modal-note' }, 'Auto-advance winner: '+teamName(m.winner)));
+  }
+
+  var footer = create('div', { class:'score-modal-actions' });
+  var leftActions = create('div', { class:'row' });
+  var rightActions = create('div', { class:'row' });
+  leftActions.appendChild(create('button', { type:'button', class:'secondary' }, 'Cancel'));
+  leftActions.querySelector('button').addEventListener('click', closeBracketScoreModal);
+  footer.appendChild(leftActions);
+  footer.appendChild(rightActions);
+
+  if(canSubmit){
+    if(round.isFinal){
+      ensureFinalSets(m);
+      var setRows = [];
+      var setGrid = create('div', { class:'score-set-grid' });
+      for(var setIdx=0; setIdx<3; setIdx++){
+        var setLabel = create('div', { class:'tiny muted' }, 'Set '+(setIdx+1));
+        var aInput = create('input', { type:'number', min:'0', value:(m.sets[setIdx].a!=null ? m.sets[setIdx].a : ''), class:'score-input' });
+        var bInput = create('input', { type:'number', min:'0', value:(m.sets[setIdx].b!=null ? m.sets[setIdx].b : ''), class:'score-input' });
+        setRows.push({ a:aInput, b:bInput });
+        var row = create('div', { class:'score-set-line' }, [
+          setLabel,
+          create('div', { class:'score-set-team mono' }, (aSeed ? (aSeed+' ') : '')+aName),
+          aInput,
+          create('div', { class:'score-set-team mono' }, (bSeed ? (bSeed+' ') : '')+bName),
+          bInput
+        ]);
+        setGrid.appendChild(row);
+      }
+      body.appendChild(setGrid);
+
+      var submitFinal = create('button', { type:'button' }, 'Submit Scores');
+      submitFinal.addEventListener('click', function(){
+        var ok = recordFinalSets(
+          m.id,
+          setRows[0].a.value, setRows[0].b.value,
+          setRows[1].a.value, setRows[1].b.value,
+          setRows[2].a.value, setRows[2].b.value
+        );
+        if(ok) closeBracketScoreModal();
+      });
+      rightActions.appendChild(submitFinal);
+    } else {
+      function buildTeamRow(seed, name, value){
+        return create('div', { class:'score-team-row' }, [
+          create('div', { class:'score-team-seed mono' }, seed ? String(seed) : ''),
+          create('div', { class:'score-team-name mono' }, name),
+          create('input', { type:'number', min:'0', value:value, class:'score-input' })
+        ]);
+      }
+
+      var rowA = buildTeamRow(aSeed, aName, (m.aScore!=null ? m.aScore : ''));
+      var rowB = buildTeamRow(bSeed, bName, (m.bScore!=null ? m.bScore : ''));
+      body.appendChild(rowA);
+      body.appendChild(rowB);
+
+      var submit = create('button', { type:'button' }, 'Submit Scores');
+      submit.addEventListener('click', function(){
+        var aVal = rowA.querySelector('input').value;
+        var bVal = rowB.querySelector('input').value;
+        var ok = recordBracketScore(m.id, aVal, bVal);
+        if(ok) closeBracketScoreModal();
+      });
+      rightActions.appendChild(submit);
+    }
+  }
+
+  modal.appendChild(head);
+  modal.appendChild(tabs);
+  modal.appendChild(body);
+  modal.appendChild(footer);
+  backdrop.appendChild(modal);
+
+  backdrop.addEventListener('click', function(e){
+    if(e.target===backdrop) closeBracketScoreModal();
+  });
+
+  document.body.appendChild(backdrop);
+  document.body.classList.add('modal-open');
+  bracketModalEscHandler = function(ev){
+    if(ev.key==='Escape') closeBracketScoreModal();
+  };
+  document.addEventListener('keydown', bracketModalEscHandler);
 }
 function drawBracketConnectors(){
   var shell = el('#bracket .bracket-shell');
@@ -1160,21 +1332,15 @@ function drawBracketConnectors(){
 
   if(rounds.length < 2) return;
 
-  function matchMidY(matchEl, fallbackRect){
-    var rows = matchEl.querySelectorAll('.bracket-team-row');
-    if(rows && rows.length >= 2){
-      var r0 = rows[0].getBoundingClientRect();
-      var r1 = rows[1].getBoundingClientRect();
-      var y0 = r0.top + r0.height/2;
-      var y1 = r1.top + r1.height/2;
-      return ((y0 + y1) / 2) - rect.top;
+  function getAnchorY(matchEl){
+    var stageWrap = matchEl.parentNode;
+    var y = parseFloat(matchEl.getAttribute('data-anchor-y'));
+    if(stageWrap && !Number.isNaN(y)){
+      var stageRect = stageWrap.getBoundingClientRect();
+      return (stageRect.top - rect.top) + y;
     }
-    var finalTitle = matchEl.querySelector('.bracket-final-title');
-    if(finalTitle){
-      var ft = finalTitle.getBoundingClientRect();
-      return (ft.top + ft.height/2) - rect.top;
-    }
-    return (fallbackRect.top + fallbackRect.height/2) - rect.top;
+    var box = matchEl.getBoundingClientRect();
+    return (box.top + box.height/2) - rect.top;
   }
 
   for(var r=0; r<rounds.length-1; r++){
@@ -1192,9 +1358,9 @@ function drawBracketConnectors(){
       var sRect = src.getBoundingClientRect();
       var dRect = dst.getBoundingClientRect();
       var x1 = sRect.right - rect.left;
-      var y1 = matchMidY(src, sRect);
+      var y1 = getAnchorY(src);
       var x4 = dRect.left - rect.left;
-      var y4 = matchMidY(dst, dRect);
+      var y4 = getAnchorY(dst);
 
       var elbow = x1 + Math.max(24, (x4 - x1) * 0.45);
       var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -1220,102 +1386,70 @@ function renderBracket(){
   svg.setAttribute('aria-hidden', 'true');
 
   var grid = create('div', { class:'bracket-grid' });
-  var layout = [];
-  var baseStep = 164;
-  var nonFinalAnchor = 52;
-  var finalAnchor = 18;
-  var nonFinalHeight = 124;
-  var finalHeight = 250;
 
-  layout[0] = Array.from({length: b.rounds[0].matches.length}, function(_, i){
-    return (i * baseStep) + nonFinalAnchor;
+  var cardHeight = 112;
+  var firstRoundGap = 40;
+  var topPadding = 18;
+  var bottomPadding = 24;
+  var centers = [];
+
+  centers[0] = Array.from({length: b.rounds[0].matches.length}, function(_, i){
+    return topPadding + (i * (cardHeight + firstRoundGap)) + (cardHeight / 2);
   });
   for(var lr=1; lr<b.rounds.length; lr++){
-    var prev = layout[lr-1];
-    layout[lr] = Array.from({length: b.rounds[lr].matches.length}, function(_, i){
-      return (prev[i*2] + prev[i*2+1]) / 2;
+    var prev = centers[lr-1];
+    centers[lr] = Array.from({length: b.rounds[lr].matches.length}, function(_, i){
+      return (prev[i*2] + prev[(i*2)+1]) / 2;
     });
   }
 
   b.rounds.forEach(function(round, roundIdx){
-    var stage = create('section', { class:'bracket-stage' });
+    var stage = create('section', { class:'bracket-stage', 'data-round-index': String(roundIdx) });
     stage.appendChild(create('h3', { class:'bracket-stage-title sr-only' }, round.title));
 
     var matchesWrap = create('div', { class:'bracket-stage-matches' });
-    var anchors = layout[roundIdx];
-    var anchorOffset = round.isFinal ? finalAnchor : nonFinalAnchor;
-    var cardHeight = round.isFinal ? finalHeight : nonFinalHeight;
-    var maxAnchor = anchors[anchors.length-1];
-    matchesWrap.style.height = String(Math.ceil(maxAnchor + cardHeight - anchorOffset + 16))+'px';
+    var anchors = centers[roundIdx];
+    var maxCenter = anchors.length ? anchors[anchors.length-1] : (topPadding + cardHeight/2);
+    matchesWrap.style.height = String(Math.ceil(maxCenter + (cardHeight/2) + bottomPadding))+'px';
 
     round.matches.forEach(function(m, matchIdx){
       var aName = resolveEntry(m.a);
       var bName = resolveEntry(m.b);
       var aSeed = getSeedForEntry(m.a);
       var bSeed = getSeedForEntry(m.b);
-      var card = create('div', { class:'bracket-match' + (round.isFinal ? ' final' : ''), 'data-match-id': m.id });
+      var cardTop = Math.round(anchors[matchIdx] - (cardHeight / 2));
+      var card = create('article', { class:'bracket-match', 'data-match-id': m.id, 'data-anchor-y': String(Math.round(anchors[matchIdx])) });
       card.style.position = 'absolute';
-      card.style.top = String(Math.round(anchors[matchIdx] - anchorOffset))+'px';
+      card.style.top = String(cardTop)+'px';
       card.style.left = '0';
 
-      card.appendChild(create('div', { class:'bracket-match-id tiny muted' }, round.isFinal ? 'Championship' : m.id));
-
-      if(round.isFinal){
-        ensureFinalSets(m);
-        var finalLeft = (aSeed ? (aSeed+' ') : '') + aName;
-        var finalRight = (bSeed ? (bSeed+' ') : '') + bName;
-        card.appendChild(create('div', { class:'bracket-final-title mono' }, finalLeft+' vs '+finalRight));
-
-        var f1a = (m.sets && m.sets[0] && m.sets[0].a!=null ? m.sets[0].a : '');
-        var f1b = (m.sets && m.sets[0] && m.sets[0].b!=null ? m.sets[0].b : '');
-        var f2a = (m.sets && m.sets[1] && m.sets[1].a!=null ? m.sets[1].a : '');
-        var f2b = (m.sets && m.sets[1] && m.sets[1].b!=null ? m.sets[1].b : '');
-        var f3a = (m.sets && m.sets[2] && m.sets[2].a!=null ? m.sets[2].a : '');
-        var f3b = (m.sets && m.sets[2] && m.sets[2].b!=null ? m.sets[2].b : '');
-
-        function finalSetRow(label, aVal, bVal){
-          return create('div', { class:'bracket-set-row' }, [
-            create('span', { class:'muted tiny' }, label),
-            create('input', { type:'number', min:'0', value:aVal }),
-            create('input', { type:'number', min:'0', value:bVal })
-          ]);
-        }
-
-        var s1 = finalSetRow('Set 1', f1a, f1b);
-        var s2 = finalSetRow('Set 2', f2a, f2b);
-        var s3 = finalSetRow('Set 3', f3a, f3b);
-        var saveFinal = create('button', {}, 'Save Final');
-        saveFinal.addEventListener('click', function(){
-          var vals = [s1,s2,s3].map(function(row){ return Array.from(row.querySelectorAll('input')).map(function(i){ return i.value; }); });
-          recordFinalSets(m.id, vals[0][0], vals[0][1], vals[1][0], vals[1][1], vals[2][0], vals[2][1]);
-        });
-        var finalStatus = create('div', { class:'tiny muted' }, m.winner ? ('Winner: '+teamName(m.winner)+' (best of 3)') : '');
-        var finalControls = create('div', { class:'bracket-controls' }, [s1, s2, s3, saveFinal, finalStatus]);
-        card.appendChild(finalControls);
-      } else {
-        var va = (m.aScore!=null ? m.aScore : '');
-        var vb = (m.bScore!=null ? m.bScore : '');
-
-        var rowA = create('div', { class:'bracket-team-row' }, [
+      var face = create('div', { class:'bracket-match-card' }, [
+        create('div', { class:'bracket-team-row' }, [
           create('div', { class:'mono bracket-seed' }, aSeed ? String(aSeed) : ''),
-          create('div', { class:'mono bracket-team-name' }, aName),
-          create('input', { type:'number', min:'0', value:va, class:'bracket-score' })
-        ]);
-        var rowB = create('div', { class:'bracket-team-row' }, [
+          create('div', { class:'mono bracket-team-name' }, aName)
+        ]),
+        create('div', { class:'bracket-team-row' }, [
           create('div', { class:'mono bracket-seed' }, bSeed ? String(bSeed) : ''),
-          create('div', { class:'mono bracket-team-name' }, bName),
-          create('input', { type:'number', min:'0', value:vb, class:'bracket-score' })
-        ]);
-        var save = create('button', {}, 'Save');
-        save.addEventListener('click', function(){
-          var aVal = rowA.querySelector('input').value;
-          var bVal = rowB.querySelector('input').value;
-          recordBracketScore(m.id, aVal, bVal);
-        });
-        var controls = create('div', { class:'bracket-controls' }, [save]);
-        card.append(rowA, rowB, controls);
-      }
+          create('div', { class:'mono bracket-team-name' }, bName)
+        ])
+      ]);
 
+      var metaLeft = round.isFinal ? 'Best of 3 sets' : 'Single match';
+      var metaRight = '';
+      if(m.winner && m.winner!=='BYE') metaRight = 'Winner: '+teamName(m.winner);
+      else if(m.winner==='BYE') metaRight = 'Auto-advance';
+
+      var footer = create('div', { class:'bracket-match-footer' }, [
+        create('div', { class:'bracket-match-meta' }, [
+          create('div', { class:'tiny muted' }, metaLeft),
+          create('div', { class:'tiny muted' }, metaRight)
+        ]),
+        create('button', { type:'button', class:'bracket-report-btn secondary' }, round.isFinal ? 'Report sets' : 'Report score')
+      ]);
+      footer.querySelector('button').addEventListener('click', function(){ openBracketScoreModal(m.id); });
+
+      card.appendChild(face);
+      card.appendChild(footer);
       matchesWrap.appendChild(card);
     });
 
@@ -1404,6 +1538,7 @@ if (loadPersisted()){
   });
   el('#clearTeams').addEventListener('click', function(){
     if(!confirm('Remove all teams?')) return;
+    closeBracketScoreModal();
     state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracketTeamCount=10; state.bracket=null;
     renderTeams(); el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#bracket').innerHTML=''; el('#champion').innerHTML='';
     el('#buildBracket').disabled=true; el('#finalizePool').disabled=true; syncUIStateFromState(); persist();
@@ -1411,7 +1546,7 @@ if (loadPersisted()){
 
   // Pool controls
   el('#makeSchedule').addEventListener('click', function(){ createSchedule(); });
-  el('#resetSchedule').addEventListener('click', function(){ state.schedule=[]; state.standings=[]; state.rankings=[]; el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#finalizePool').disabled=true; el('#buildBracket').disabled=true; syncUIStateFromState(); persist(); });
+  el('#resetSchedule').addEventListener('click', function(){ closeBracketScoreModal(); state.schedule=[]; state.standings=[]; state.rankings=[]; el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#finalizePool').disabled=true; el('#buildBracket').disabled=true; syncUIStateFromState(); persist(); });
   el('#finalizePool').addEventListener('click', finalizePool);
 
   // Bracket controls
@@ -1425,9 +1560,8 @@ if (loadPersisted()){
     persist();
   }
   el('#bracketTeamCount').addEventListener('change', onBracketTeamCountChange);
-  el('#bracketTeamCount').addEventListener('input', onBracketTeamCountChange);
   el('#buildBracket').addEventListener('click', buildBracketFromRankings);
-  el('#resetBracket').addEventListener('click', function(){ state.bracket=null; el('#bracket').innerHTML=''; el('#champion').innerHTML=''; syncUIStateFromState(); persist(); });
+  el('#resetBracket').addEventListener('click', function(){ closeBracketScoreModal(); state.bracket=null; el('#bracket').innerHTML=''; el('#champion').innerHTML=''; syncUIStateFromState(); persist(); });
 
   // Tests
   el('#runTests').addEventListener('click', runTests);
@@ -1443,6 +1577,7 @@ function logResult(msg, ok){
   (ok? console.log : console.error)(line.textContent);
 }
 function resetAll(){
+  closeBracketScoreModal();
   state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracketTeamCount=10; state.bracket=null;
   renderTeams();
   el('#poolSchedule').innerHTML='';
@@ -1464,13 +1599,32 @@ function getRequestedTestTeamCount(){
   if(input) input.value = String(count);
   return count;
 }
+function getRequestedTestBracketCount(maxCount){
+  var input = el('#testBracketCount');
+  var count = input ? parseInt(input.value,10) : 8;
+  if(Number.isNaN(count)) count = Math.min(8, maxCount);
+  if(count < 2) count = 2;
+  if(count > maxCount) count = maxCount;
+  if(input) input.value = String(count);
+  return count;
+}
 function buildTestTeamNames(count){
   var names = [];
   for(var i=1;i<=count;i++) names.push('T'+i);
   return names;
 }
+function addAndCheckTeams(names){
+  names.forEach(function(name){
+    addTeam(name);
+    var t = state.teams[state.teams.length-1];
+    if(t) t.checked = true;
+  });
+  renderTeams();
+  persist();
+}
 function runTests(){
   var testTeamCount = getRequestedTestTeamCount();
+  var requestedBracketCount = getRequestedTestBracketCount(testTeamCount);
   var testTeamNames = buildTestTeamNames(testTeamCount);
   resetAll();
 
@@ -1487,7 +1641,7 @@ function runTests(){
 
   // Build a small pool for deterministic checks
   resetAll();
-  addTeam('Alpha'); addTeam('Bravo'); addTeam('Charlie'); addTeam('Delta');
+  addAndCheckTeams(['Alpha','Bravo','Charlie','Delta']);
   logResult('Added 4 teams', state.teams.length===4);
 
   // Force 5-round schedule (legacy test path) -> 4 matches + Bye row
@@ -1524,7 +1678,7 @@ function runTests(){
   logResult('Finalize blocked when unsaved matches remain', finalizeBlocked===true);
 
   // Rematch prevention (manual schedule)
-  resetAll(); testTeamNames.forEach(addTeam);
+  resetAll(); addAndCheckTeams(['A','B','C','D','E','F','G','H']);
   el('#manualMode').checked = true; createSchedule(4);
   // Round 1: set a known match A vs B
   el('#aSel-1-0').value = String(state.teams[0].id);
@@ -1546,21 +1700,46 @@ function runTests(){
   saveRound(2); window.alert=prevAlert2;
   logResult('Rematch prevention enforced across rounds', rematchBlocked===true);
 
-  // Auto-schedule flow to finish bracket path quickly
-  resetAll(); testTeamNames.forEach(addTeam);
-  el('#manualMode').checked = false; createSchedule(4);
+  // Auto-schedule flow with variable pool team count and bracket qualifiers
+  resetAll(); addAndCheckTeams(testTeamNames);
+  el('#manualMode').checked = false; createSchedule();
+  var fmt = computeFormat(testTeamCount);
+  var expectedMatchesPerRound = fmt ? fmt.matchesPerRound : Math.ceil(testTeamCount/2);
+  var poolUsesAllTeams = state.schedule.every(function(r){
+    return r.matches.filter(function(m){ return !m.isBye; }).length === expectedMatchesPerRound;
+  });
+  logResult('Pool auto-schedule uses configured team count per round', poolUsesAllTeams===true);
+
   state.schedule.forEach(function(r){
     r.matches.forEach(function(m, mi){
-      if(m.isBye) return; el('#aScore-'+r.round+'-'+mi).value='21'; el('#bScore-'+r.round+'-'+mi).value='19';
+      if(m.isBye) return;
+      if(m.a==='BYE' || m.b==='BYE') return;
+      el('#aScore-'+r.round+'-'+mi).value='21';
+      el('#bScore-'+r.round+'-'+mi).value='19';
     });
+    var byeA = el('#byeA-'+r.round), byeB = el('#byeB-'+r.round);
+    if(byeA && byeB){
+      var used = new Set();
+      r.matches.forEach(function(m){
+        if(m.isBye) return;
+        if(m.a && m.a!=='BYE') used.add(m.a);
+        if(m.b && m.b!=='BYE') used.add(m.b);
+      });
+      var resting = state.teams.map(function(t){ return t.id; }).filter(function(id){ return !used.has(id); });
+      if(resting.length>=2){
+        byeA.value = String(resting[0]);
+        byeB.value = String(resting[1]);
+      }
+    }
     saveRound(r.round);
   });
-  var qualifierCount = Math.max(2, Math.min(8, testTeamCount));
-  el('#bracketTeamCount').value = String(qualifierCount);
+
   finalizePool();
+  var qualifierCount = Math.max(2, Math.min(requestedBracketCount, state.rankings.length));
   el('#bracketTeamCount').value = String(qualifierCount);
 
   buildBracketFromRankings();
+  logResult('Bracket uses configured qualifier count', !!state.bracket && state.bracket.qualifiers===qualifierCount);
   state.bracket.rounds.forEach(function(round){
     if(round.isFinal) return;
     round.matches.forEach(function(mm){
@@ -1574,11 +1753,11 @@ function runTests(){
   });
   renderBracket();
   // Final best-of-3: 2-0
-  var finalCol = el('#bracket');
-  var inputs = finalCol.querySelectorAll('.bracket-stage:last-child input');
-  inputs[0].value='25'; inputs[1].value='22'; // Set 1
-  inputs[2].value='25'; inputs[3].value='23'; // Set 2
-  finalCol.querySelector('.bracket-stage:last-child button').click();
+  var finalRound = state.bracket.rounds[state.bracket.rounds.length-1];
+  var finalMatch = finalRound && finalRound.matches ? finalRound.matches[0] : null;
+  if(finalMatch){
+    recordFinalSets(finalMatch.id, 25,22, 25,23, '', '');
+  }
   var champSet = !!el('#champion').textContent.includes('Champion');
   logResult('Final best-of-3 determines champion with 2-0', champSet===true);
 }
