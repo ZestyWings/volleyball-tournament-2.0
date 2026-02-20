@@ -123,6 +123,10 @@ function syncUIStateFromState(){
   if (finalizeBtn) {
     finalizeBtn.disabled = !hasSchedule;
   }
+  var printBtn = document.querySelector('#printSchedule');
+  if (printBtn) {
+    printBtn.disabled = !hasSchedule;
+  }
 
   // Build bracket button:
   var buildBtn = document.querySelector('#buildBracket');
@@ -688,6 +692,93 @@ function renderSchedule(){
     }
 
     holder.appendChild(wrap);
+  });
+}
+
+function buildPrintableScheduleSheet(){
+  var sheet = el('#printSheet');
+  if(!sheet) return;
+  sheet.innerHTML = '';
+
+  if(!Array.isArray(state.schedule) || state.schedule.length===0){
+    sheet.appendChild(create('h2', { class:'print-title' }, 'No schedule to print'));
+    return;
+  }
+
+  var gameTotal = 0;
+  state.schedule.forEach(function(r){
+    r.matches.forEach(function(m){ if(!m.isBye) gameTotal += 1; });
+  });
+
+  var now = new Date();
+  var printedAt = now.toLocaleDateString()+' '+now.toLocaleTimeString();
+
+  sheet.appendChild(create('div', { class:'print-sheet-head' }, [
+    create('h2', { class:'print-title' }, 'Volleyball Tournament - Pool Play Schedule'),
+    create('div', { class:'print-meta' }, 'Rounds: '+state.schedule.length+' | Games: '+gameTotal+' | Printed: '+printedAt)
+  ]));
+
+  var roundsGrid = create('div', { class:'print-rounds-grid' });
+
+  state.schedule.forEach(function(round){
+    var roundBox = create('section', { class:'print-round-box' });
+    roundBox.appendChild(create('h3', { class:'print-round-title' }, 'Round '+round.round));
+
+    var table = create('table', { class:'print-round-table' });
+    table.appendChild(create('thead', {}, create('tr', {}, [
+      create('th', { class:'print-col-note-head' }, ''),
+      create('th', {}, 'Team I'),
+      create('th', {}, 'Team II'),
+      create('th', {}, 'Team I Score'),
+      create('th', {}, 'Team II Score')
+    ])));
+
+    var tb = create('tbody');
+    var hasRows = false;
+    round.matches.forEach(function(m){
+      if(m.isBye) return;
+      hasRows = true;
+
+      var aName = teamName(m.a);
+      var bName = teamName(m.b);
+      var aScore = (m.aScore!=='' && m.aScore!=null) ? String(m.aScore) : '';
+      var bScore = (m.bScore!=='' && m.bScore!=null) ? String(m.bScore) : '';
+
+      var row = create('tr', {}, [
+        create('td', { class:'print-col-note' }, ''),
+        create('td', { class:'print-col-team' }, aName),
+        create('td', { class:'print-col-team' }, bName),
+        create('td', { class:'print-col-score' }, create('div', { class:'print-score-box' }, aScore)),
+        create('td', { class:'print-col-score' }, create('div', { class:'print-score-box' }, bScore))
+      ]);
+      tb.appendChild(row);
+    });
+
+    if(!hasRows){
+      tb.appendChild(create('tr', {}, [
+        create('td', { colspan:'5', class:'print-empty-row' }, 'No games in this round')
+      ]));
+    }
+
+    table.appendChild(tb);
+    roundBox.appendChild(table);
+    roundsGrid.appendChild(roundBox);
+  });
+
+  sheet.appendChild(roundsGrid);
+
+  sheet.appendChild(create('div', { class:'print-footnote' }, 'Use blank score boxes for handwritten results.'));
+}
+
+function printSchedule(){
+  if(!Array.isArray(state.schedule) || state.schedule.length===0){
+    alert('Create a pool schedule first.');
+    return;
+  }
+  closeBracketScoreModal();
+  buildPrintableScheduleSheet();
+  window.requestAnimationFrame(function(){
+    window.print();
   });
 }
 
@@ -1312,6 +1403,19 @@ function openBracketScoreModal(matchId){
   };
   document.addEventListener('keydown', bracketModalEscHandler);
 }
+function shouldHideBracketMatch(round, match){
+  if(!round || round.isFinal) return false;
+  var aId = getEntryId(match.a);
+  var bId = getEntryId(match.b);
+
+  // Keep placeholders visible until prior-round winners are known.
+  if(aId==null || bId==null) return false;
+
+  // Hide auto-advance cards so byes don't clutter the bracket view.
+  if(aId==='BYE' && bId==='BYE') return true;
+  if(aId==='BYE' || bId==='BYE') return true;
+  return false;
+}
 function drawBracketConnectors(){
   var shell = el('#bracket .bracket-shell');
   if(!shell || !state.bracket || !Array.isArray(state.bracket.rounds)) return;
@@ -1409,10 +1513,18 @@ function renderBracket(){
 
     var matchesWrap = create('div', { class:'bracket-stage-matches' });
     var anchors = centers[roundIdx];
-    var maxCenter = anchors.length ? anchors[anchors.length-1] : (topPadding + cardHeight/2);
+    var visibleAnchors = [];
+    round.matches.forEach(function(m, idx){
+      if(shouldHideBracketMatch(round, m)) return;
+      visibleAnchors.push(anchors[idx]);
+    });
+    var activeAnchors = visibleAnchors.length ? visibleAnchors : anchors;
+    var maxCenter = activeAnchors.length ? activeAnchors[activeAnchors.length-1] : (topPadding + cardHeight/2);
     matchesWrap.style.height = String(Math.ceil(maxCenter + (cardHeight/2) + bottomPadding))+'px';
 
     round.matches.forEach(function(m, matchIdx){
+      if(shouldHideBracketMatch(round, m)) return;
+
       var aName = resolveEntry(m.a);
       var bName = resolveEntry(m.b);
       var aSeed = getSeedForEntry(m.a);
@@ -1540,13 +1652,14 @@ if (loadPersisted()){
     if(!confirm('Remove all teams?')) return;
     closeBracketScoreModal();
     state.teams=[]; nextTeamId=1; state.schedule=[]; state.standings=[]; state.rankings=[]; state.bracketTeamCount=10; state.bracket=null;
-    renderTeams(); el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#bracket').innerHTML=''; el('#champion').innerHTML='';
+    renderTeams(); el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#bracket').innerHTML=''; el('#champion').innerHTML=''; el('#printSheet').innerHTML='';
     el('#buildBracket').disabled=true; el('#finalizePool').disabled=true; syncUIStateFromState(); persist();
   });
 
   // Pool controls
   el('#makeSchedule').addEventListener('click', function(){ createSchedule(); });
-  el('#resetSchedule').addEventListener('click', function(){ closeBracketScoreModal(); state.schedule=[]; state.standings=[]; state.rankings=[]; el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#finalizePool').disabled=true; el('#buildBracket').disabled=true; syncUIStateFromState(); persist(); });
+  el('#resetSchedule').addEventListener('click', function(){ closeBracketScoreModal(); state.schedule=[]; state.standings=[]; state.rankings=[]; el('#poolSchedule').innerHTML=''; el('#standings').innerHTML=''; el('#printSheet').innerHTML=''; el('#finalizePool').disabled=true; el('#buildBracket').disabled=true; syncUIStateFromState(); persist(); });
+  el('#printSchedule').addEventListener('click', printSchedule);
   el('#finalizePool').addEventListener('click', finalizePool);
 
   // Bracket controls
@@ -1584,6 +1697,7 @@ function resetAll(){
   el('#standings').innerHTML='';
   el('#bracket').innerHTML='';
   el('#champion').innerHTML='';
+  el('#printSheet').innerHTML='';
   el('#buildBracket').disabled=true;
   el('#finalizePool').disabled=true;
   el('#testResults').innerHTML='';

@@ -427,3 +427,109 @@ button, input, select { min-height: 44px; } /* comfy touch targets */
 /* Larger checkbox for touch */
 input[type="checkbox"] { width: 20px; height: 20px; }
 
+/* Printable pool schedule sheet */
+.print-sheet { display: none; }
+.print-sheet-head { margin-bottom: 8px; }
+.print-title { margin: 0 0 4px; font-size: 1.05rem; }
+.print-meta { font-size: .78rem; opacity: .8; }
+.print-rounds-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.print-round-box {
+  border: 1px solid #1a1a1a;
+  break-inside: avoid;
+}
+.print-round-title {
+  margin: 0;
+  padding: 3px 6px;
+  font-size: .78rem;
+  background: #ececec;
+  border-bottom: 1px solid #1a1a1a;
+}
+.print-round-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.print-round-table th,
+.print-round-table td {
+  border: 1px solid #1a1a1a;
+  padding: 2px 4px;
+  font-size: .68rem;
+}
+.print-col-note-head,
+.print-col-note { width: 4%; }
+.print-col-team { width: 24%; }
+.print-col-score { width: 24%; }
+.print-col-note {
+  padding-left: 1px;
+  padding-right: 1px;
+}
+.print-score-box {
+  min-height: 14px;
+  line-height: 14px;
+  border: 1px solid #1a1a1a;
+  text-align: center;
+}
+.print-empty-row {
+  text-align: center;
+  font-style: italic;
+  opacity: .8;
+}
+.print-footnote {
+  margin-top: 6px;
+  font-size: .7rem;
+  opacity: .85;
+}
+
+@media print {
+  @page {
+    size: letter landscape;
+    margin: 0.35in;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #000;
+  }
+
+  .wrap {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    display: block;
+  }
+
+  .wrap > :not(.print-sheet) {
+    display: none !important;
+  }
+
+  .print-sheet {
+    display: block !important;
+    color: #000;
+    page-break-inside: avoid;
+  }
+
+  .print-title { font-size: 15px; }
+  .print-meta { font-size: 10px; }
+  .print-rounds-grid { gap: 6px; }
+  .print-round-title {
+    font-size: 10px;
+    padding: 2px 4px;
+  }
+  .print-round-table th,
+  .print-round-table td {
+    padding: 2px 4px;
+    font-size: 9px;
+    line-height: 1.1;
+  }
+  .print-score-box {
+    min-height: 14px;
+    line-height: 14px;
+  }
+}
+
